@@ -52,6 +52,13 @@ server:
 routes:
   openai_enabled: true
   anthropic_enabled: true
+
+models:
+  available_models:
+    - id: "gpt-3.5-turbo"
+      owned_by: "openai"
+      created: 1677610602
+    # ... 更多模型配置
 ```
 
 ### 3. 启动服务
@@ -72,10 +79,28 @@ python proxy_server.py --reload
 
 ### 4. 测试接口
 
+**服务信息**：
+
+```bash
+curl http://127.0.0.1:8080/
+```
+
 **健康检查**：
 
 ```bash
 curl http://127.0.0.1:8080/health
+```
+
+**列出所有可用模型**：
+
+```bash
+curl http://127.0.0.1:8080/v1/models
+```
+
+**获取特定模型信息**：
+
+```bash
+curl http://127.0.0.1:8080/v1/models/gpt-3.5-turbo
 ```
 
 **OpenAI 格式（非流式）**：
@@ -128,6 +153,70 @@ curl -X POST http://127.0.0.1:8080/v1/messages \
 ```
 
 ## API 文档
+
+### 服务信息 API
+
+**路径**：`GET /`
+
+**响应格式**：
+
+```json
+{
+  "service": "Interface Proxy Service",
+  "version": "1.0.0",
+  "description": "LLM 接口代理服务，支持 OpenAI 和 Anthropic 格式互转",
+  "endpoints": {
+    "health": "/health",
+    "openai_chat": "/v1/chat/completions",
+    "anthropic_messages": "/v1/messages",
+    "models_list": "/v1/models",
+    "model_detail": "/v1/models/{model_id}"
+  },
+  "backend_url": "http://127.0.0.1:8000"
+}
+```
+
+### Models API
+
+**列出所有模型**：`GET /v1/models`
+
+**响应格式**：
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "gpt-3.5-turbo",
+      "object": "model",
+      "created": 1677610602,
+      "owned_by": "openai",
+      "permission": [...],
+      "root": "gpt-3.5-turbo",
+      "parent": null
+    },
+    ...
+  ]
+}
+```
+
+**获取特定模型**：`GET /v1/models/{model_id}`
+
+**响应格式**：
+
+```json
+{
+  "id": "gpt-3.5-turbo",
+  "object": "model",
+  "created": 1677610602,
+  "owned_by": "openai",
+  "permission": [...],
+  "root": "gpt-3.5-turbo",
+  "parent": null
+}
+```
+
+完整的开发文档请参考：[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
 ### OpenAI Chat Completions API
 
@@ -353,6 +442,29 @@ data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text
 
 ### Python + OpenAI SDK
 
+#### 列出可用模型
+
+```python
+from openai import OpenAI
+
+# 指向代理服务
+client = OpenAI(
+    base_url="http://127.0.0.1:8080/v1",
+    api_key="dummy"  # 代理服务不需要 API key
+)
+
+# 列出所有模型
+models = client.models.list()
+for model in models.data:
+    print(f"{model.id} - {model.owned_by}")
+
+# 获取特定模型信息
+model = client.models.retrieve("gpt-3.5-turbo")
+print(f"Model: {model.id}, Created: {model.created}")
+```
+
+#### Chat Completions（非流式）
+
 ```python
 from openai import OpenAI
 
@@ -368,7 +480,11 @@ response = client.chat.completions.create(
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)
+```
 
+#### Chat Completions（流式）
+
+```python
 # 流式
 stream = client.chat.completions.create(
     model="gpt-3.5-turbo",
@@ -578,6 +694,14 @@ A: 在 `proxy_app/app.py` 中添加 FastAPI 的 `Depends` 中间件实现 API Ke
 - [ ] 添加缓存层（Redis）
 - [ ] 添加监控和指标（Prometheus）
 - [ ] WebUI 管理界面
+
+## 文档
+
+- **[README.md](README.md)** - 项目主文档（本文件）
+- **[plan.md](plan.md)** - 开发思路和计划
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - 开发文档（实现细节、API 使用指南、技术细节）
+- **[docs/REASONING_CONTENT_SUPPORT.md](docs/REASONING_CONTENT_SUPPORT.md)** - 推理内容支持说明
+- **[examples/](examples/)** - 使用示例代码
 
 ## 许可证
 

@@ -28,3 +28,33 @@ routes:
 
   # 是否启用 Anthropic 格式接口 /v1/messages
   anthropic_enabled: true
+
+# 模型配置
+models:
+  # 支持的模型列表
+  # 每个模型包含：id（模型名称）、owned_by（所有者）、created（创建时间戳）
+  available_models:
+    - id: "gpt-4"
+      owned_by: "openai"
+      created: 1687882411
+    - id: "gpt-4-turbo"
+      owned_by: "openai"
+      created: 1712361441
+    - id: "gpt-3.5-turbo"
+      owned_by: "openai"
+      created: 1677610602
+    - id: "claude-3-opus-20240229"
+      owned_by: "anthropic"
+      created: 1709251200
+    - id: "claude-3-sonnet-20240229"
+      owned_by: "anthropic"
+      created: 1709251200
+    - id: "claude-3-5-sonnet-20241022"
+      owned_by: "anthropic"
+      created: 1729641600
+    - id: "o1-preview"
+      owned_by: "openai"
+      created: 1725494400
+    - id: "o1-mini"
+      owned_by: "openai"
+      created: 1725494400

@@ -233,3 +233,71 @@ class ChatCompletionChunk(BaseModel):
     choices: List[StreamChoice]
     usage: Optional[Usage] = None
     system_fingerprint: Optional[str] = None
+
+
+# ==================== Models API 相关模型 ====================
+
+class ModelPermission(BaseModel):
+    """
+    模型权限信息
+
+    Attributes:
+        id: 权限标识符
+        object: 对象类型（model_permission）
+        created: 创建时间戳
+        allow_create_engine: 是否允许创建引擎
+        allow_sampling: 是否允许采样
+        allow_logprobs: 是否允许返回 logprobs
+        allow_search_indices: 是否允许搜索索引
+        allow_view: 是否允许查看
+        allow_fine_tuning: 是否允许微调
+        organization: 组织标识
+        group: 组标识
+        is_blocking: 是否阻塞
+    """
+    id: str
+    object: Literal["model_permission"] = "model_permission"
+    created: int
+    allow_create_engine: bool = False
+    allow_sampling: bool = True
+    allow_logprobs: bool = True
+    allow_search_indices: bool = False
+    allow_view: bool = True
+    allow_fine_tuning: bool = False
+    organization: str = "*"
+    group: Optional[str] = None
+    is_blocking: bool = False
+
+
+class Model(BaseModel):
+    """
+    模型信息
+
+    Attributes:
+        id: 模型标识符（例如：gpt-3.5-turbo）
+        object: 对象类型（model）
+        created: 创建时间戳
+        owned_by: 所有者（例如：openai, organization-owner）
+        permission: 权限列表
+        root: 根模型
+        parent: 父模型
+    """
+    id: str
+    object: Literal["model"] = "model"
+    created: int
+    owned_by: str = "openai"
+    permission: Optional[List[ModelPermission]] = None
+    root: Optional[str] = None
+    parent: Optional[str] = None
+
+
+class ModelList(BaseModel):
+    """
+    模型列表响应
+
+    Attributes:
+        object: 对象类型（list）
+        data: 模型列表
+    """
+    object: Literal["list"] = "list"
+    data: List[Model]

@@ -101,6 +101,18 @@ class Config:
         """是否启用 Anthropic 格式接口"""
         return self._config["routes"]["anthropic_enabled"]
 
+    # ==================== 模型配置 ====================
+
+    @property
+    def available_models(self) -> list:
+        """
+        获取可用的模型列表
+
+        Returns:
+            模型配置列表，每个模型包含 id, owned_by, created 字段
+        """
+        return self._config.get("models", {}).get("available_models", [])
+
     def __repr__(self) -> str:
         """返回配置的字符串表示"""
         return (
