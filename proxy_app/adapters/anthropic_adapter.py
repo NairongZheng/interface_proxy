@@ -6,7 +6,7 @@ Anthropic 格式适配器
 import json
 import time
 import uuid
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, Dict, Any
 
 from proxy_app.adapters.base_adapter import BaseAdapter
 from proxy_app.models.anthropic_models import (
