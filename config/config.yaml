@@ -1,0 +1,30 @@
+# 后端服务配置
+backend:
+  # 后端模型服务地址（例如：http://127.0.0.1:8000）
+  url: "http://127.0.0.1:8000"
+
+  # 请求超时时间（秒）
+  timeout: 600.0
+
+  # HTTP 连接池配置
+  max_connections: 100
+  max_keepalive_connections: 20
+
+# 代理服务配置
+server:
+  # 监听地址（0.0.0.0 表示监听所有网卡）
+  host: "0.0.0.0"
+
+  # 监听端口
+  port: 8080
+
+  # 日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
+  log_level: "INFO"
+
+# 路由配置
+routes:
+  # 是否启用 OpenAI 格式接口 /v1/chat/completions
+  openai_enabled: true
+
+  # 是否启用 Anthropic 格式接口 /v1/messages
+  anthropic_enabled: true
