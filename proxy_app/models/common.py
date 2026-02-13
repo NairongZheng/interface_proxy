@@ -11,14 +11,16 @@ class InternalMessage(TypedDict, total=False):
     内部统一的消息格式
 
     Attributes:
-        role: 消息角色（system, user, assistant）
-        content: 消息内容（文本）
-        tool_calls: 工具调用列表（可选）
-        tool_call_id: 工具调用 ID（可选，用于 tool 角色）
+        role: 消息角色（system, user, assistant, tool）
+        content: 消息内容（文本字符串或内容块列表）
+                 - 字符串：纯文本消息
+                 - 列表：包含多种类型的内容块（如 tool_result）
+        tool_calls: 工具调用列表（可选，assistant 角色使用）
+        tool_call_id: 工具调用 ID（可选，tool 角色使用）
         name: 消息名称（可选）
     """
     role: Literal["system", "user", "assistant", "tool"]
-    content: str
+    content: str | List[Dict[str, Any]]  # 更新：支持数组格式（用于工具结果）
     tool_calls: Optional[List[Dict[str, Any]]]
     tool_call_id: Optional[str]
     name: Optional[str]
@@ -34,6 +36,7 @@ class InternalRequest(TypedDict, total=False):
         messages: 消息列表
         model: 模型名称
         stream: 是否流式输出
+        tools: 工具定义列表（可选）
         temperature: 温度参数（0-2），控制随机性
         max_tokens: 最大生成 token 数
         top_p: nucleus sampling 参数（0-1）
@@ -46,6 +49,7 @@ class InternalRequest(TypedDict, total=False):
     messages: List[InternalMessage]
     model: str
     stream: bool
+    tools: Optional[List[Dict[str, Any]]]  # 新增：工具定义列表
     temperature: Optional[float]
     max_tokens: Optional[int]
     top_p: Optional[float]

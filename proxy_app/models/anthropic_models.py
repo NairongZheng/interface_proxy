@@ -66,8 +66,52 @@ class ThinkingContentBlock(BaseModel):
     thinking: str
 
 
-# 内容块可以是文本、图片或推理
-ContentBlock = Union[TextContentBlock, ImageContentBlock, ThinkingContentBlock]
+class ToolUseContentBlock(BaseModel):
+    """
+    工具调用内容块
+
+    模型在需要调用工具时返回此类型的 content block。
+    这是模型请求执行某个工具的信号，客户端需要执行工具并返回结果。
+
+    Attributes:
+        type: 内容类型（tool_use）
+        id: 工具调用的唯一标识符（用于匹配工具结果）
+        name: 要调用的工具名称
+        input: 工具输入参数（字典格式）
+    """
+    type: Literal["tool_use"] = "tool_use"
+    id: str
+    name: str
+    input: Dict[str, Any]
+
+
+class ToolResultContentBlock(BaseModel):
+    """
+    工具结果内容块
+
+    用于在后续消息中返回工具执行结果给模型。
+    客户端执行工具后，需要将结果包装在这个 content block 中发送回模型。
+
+    Attributes:
+        type: 内容类型（tool_result）
+        tool_use_id: 对应的工具调用 ID（与 ToolUseContentBlock.id 匹配）
+        content: 工具执行结果（文本或内容块列表）
+        is_error: 是否是错误结果（可选，true 表示工具执行失败）
+    """
+    type: Literal["tool_result"] = "tool_result"
+    tool_use_id: str
+    content: Union[str, List["ContentBlock"]]
+    is_error: Optional[bool] = None
+
+
+# 内容块可以是文本、图片、推理、工具调用或工具结果
+ContentBlock = Union[
+    TextContentBlock,
+    ImageContentBlock,
+    ThinkingContentBlock,
+    ToolUseContentBlock,
+    ToolResultContentBlock,
+]
 
 
 class SystemTextBlock(BaseModel):
@@ -90,6 +134,41 @@ class SystemTextBlock(BaseModel):
 
 # System 内容块类型（目前只支持 text 类型）
 SystemContentBlock = SystemTextBlock
+
+
+# ==================== 工具定义相关模型 ====================
+
+class ToolInputSchema(BaseModel):
+    """
+    工具输入参数的 JSON Schema
+
+    定义工具接受的参数格式，遵循 JSON Schema 规范。
+    模型会根据这个 schema 生成符合格式的参数。
+
+    Attributes:
+        type: schema 类型（通常是 "object"）
+        properties: 参数属性定义（字典，key 是参数名，value 是参数的 schema）
+        required: 必需参数列表（可选）
+    """
+    type: Literal["object"] = "object"
+    properties: Dict[str, Any]
+    required: Optional[List[str]] = None
+
+
+class Tool(BaseModel):
+    """
+    工具定义
+
+    向模型声明一个可用的工具（函数/API），模型可以根据需要调用这个工具。
+
+    Attributes:
+        name: 工具名称（唯一标识符，只能包含字母、数字、下划线）
+        description: 工具描述（告诉模型这个工具的功能和使用场景）
+        input_schema: 工具输入参数的 JSON Schema
+    """
+    name: str
+    description: str
+    input_schema: ToolInputSchema
 
 
 # ==================== 消息相关模型 ====================
@@ -120,6 +199,8 @@ class AnthropicMessagesRequest(BaseModel):
                 支持两种格式：
                 1. 字符串格式（旧格式）：简单的字符串
                 2. 内容块数组格式（新格式）：支持 prompt caching
+        tools: 工具定义列表（可选）
+               向模型声明可用的工具，模型可以根据需要调用这些工具
         temperature: 温度参数（0-1），控制随机性
         top_p: nucleus sampling 参数（0-1）
         top_k: top-k sampling 参数
@@ -131,6 +212,7 @@ class AnthropicMessagesRequest(BaseModel):
     messages: List[AnthropicMessage]
     max_tokens: int = Field(..., ge=1)  # 必需参数
     system: Optional[Union[str, List[SystemContentBlock]]] = None
+    tools: Optional[List[Tool]] = None  # 新增：工具定义列表
     temperature: Optional[float] = Field(default=1.0, ge=0, le=1)
     top_p: Optional[float] = Field(default=None, ge=0, le=1)
     top_k: Optional[int] = Field(default=None, ge=1)
@@ -165,18 +247,18 @@ class AnthropicMessagesResponse(BaseModel):
         id: 响应的唯一标识符
         type: 响应类型（message）
         role: 响应角色（assistant）
-        content: 内容块列表（可包含 text, image, thinking 等类型）
+        content: 内容块列表（可包含 text, image, thinking, tool_use 等类型）
         model: 使用的模型名称
-        stop_reason: 停止原因（end_turn, max_tokens, stop_sequence）
+        stop_reason: 停止原因（end_turn, max_tokens, stop_sequence, tool_use）
         stop_sequence: 实际匹配的停止序列（可选）
         usage: token 使用统计
     """
     id: str
     type: Literal["message"] = "message"
     role: Literal["assistant"] = "assistant"
-    content: List[Union[TextContentBlock, ThinkingContentBlock]]
+    content: List[Union[TextContentBlock, ThinkingContentBlock, ToolUseContentBlock]]
     model: str
-    stop_reason: Optional[Literal["end_turn", "max_tokens", "stop_sequence"]] = None
+    stop_reason: Optional[Literal["end_turn", "max_tokens", "stop_sequence", "tool_use"]] = None
     stop_sequence: Optional[str] = None
     usage: Optional[AnthropicUsage] = None
 

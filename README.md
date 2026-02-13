@@ -22,6 +22,7 @@
 ✅ **接口转发**：代理后端模型服务的请求
 ✅ **流式支持**：支持流式和非流式两种模式
 ✅ **推理内容支持**：完整支持 reasoning_content（OpenAI o1）和 thinking（Anthropic）
+✅ **工具调用支持**：完整支持 Tool Use 功能，兼容 Claude Code CLI
 ✅ **模块化**：代码结构清晰，便于扩展新格式
 ✅ **可配置**：通过 YAML 配置文件管理
 ✅ **高性能**：基于 FastAPI + httpx 异步架构
@@ -524,6 +525,60 @@ with client.messages.stream(
     for text in stream.text_stream:
         print(text, end="")
 ```
+
+### 工具调用示例（Tool Use）
+
+代理服务完整支持 Anthropic 的工具调用功能，兼容 Claude Code CLI。
+
+```python
+from anthropic import Anthropic
+
+# 指向代理服务
+client = Anthropic(
+    base_url="http://127.0.0.1:8080",
+    api_key="dummy"
+)
+
+# 定义工具
+tools = [
+    {
+        "name": "get_weather",
+        "description": "获取指定城市的天气信息",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "城市名称"
+                },
+                "unit": {
+                    "type": "string",
+                    "enum": ["celsius", "fahrenheit"],
+                    "description": "温度单位"
+                }
+            },
+            "required": ["location"]
+        }
+    }
+]
+
+# 调用模型（带工具定义）
+response = client.messages.create(
+    model="claude-3-opus-20240229",
+    max_tokens=1024,
+    tools=tools,
+    messages=[{"role": "user", "content": "北京今天天气怎么样？"}]
+)
+
+# 处理工具调用
+for block in response.content:
+    if block.type == "tool_use":
+        print(f"工具: {block.name}")
+        print(f"参数: {block.input}")
+        # 执行工具并返回结果...
+```
+
+更多示例请参考 `examples/tool_use_example.py`。
 
 ## 架构说明
 

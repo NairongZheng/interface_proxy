@@ -45,8 +45,9 @@ class AnthropicAdapter(BaseAdapter):
 
         主要处理：
         1. 提取独立的 system 字段并合并到 messages
-        2. 转换多模态 content 为纯文本
+        2. 转换多模态 content 为纯文本或结构化内容
         3. 映射参数名（stop_sequences → stop）
+        4. 转换工具定义（Anthropic 格式 → OpenAI 格式）
 
         Args:
             request_data: Anthropic AnthropicMessagesRequest 对象
@@ -92,29 +93,60 @@ class AnthropicAdapter(BaseAdapter):
         if request_data.stop_sequences:
             internal_request["stop"] = request_data.stop_sequences
 
+        # 新增：转换工具定义（Anthropic → OpenAI 格式）
+        if request_data.tools:
+            internal_request["tools"] = [
+                {
+                    "type": "function",  # OpenAI 格式使用 "function" type
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.input_schema.model_dump(),
+                    },
+                }
+                for tool in request_data.tools
+            ]
+
         return internal_request
 
-    def _extract_text_content(self, content: str | List[ContentBlock]) -> str:
+    def _extract_text_content(self, content: str | List[ContentBlock]) -> str | List[Dict[str, Any]]:
         """
-        从多模态 content 中提取纯文本
+        从多模态 content 中提取内容
 
         Anthropic 的 content 可以是：
         1. 字符串（纯文本）
-        2. 内容块列表（包含 text 和 image 等）
+        2. 内容块列表（包含 text、image、tool_result 等）
 
-        这里我们只提取文本部分，图片内容会被忽略（因为大多数后端不支持多模态）
+        处理逻辑：
+        - 如果包含 tool_result：返回完整的结构化内容（用于多轮工具调用）
+        - 否则：只提取文本部分（图片内容会被忽略，因为大多数后端不支持多模态）
 
         Args:
             content: Anthropic 的 content 字段
 
         Returns:
-            提取的纯文本
+            提取的纯文本或结构化内容列表
         """
         # 如果是字符串，直接返回
         if isinstance(content, str):
             return content
 
-        # 如果是列表，提取所有 text 类型的块
+        # 检查是否包含 tool_result
+        has_tool_result = any(
+            (isinstance(block, dict) and block.get("type") == "tool_result")
+            or (hasattr(block, "type") and block.type == "tool_result")
+            for block in content
+        )
+
+        # 如果包含 tool_result，返回完整的结构化内容
+        # 因为后端需要知道工具调用的结果
+        if has_tool_result:
+            return [
+                block.model_dump() if hasattr(block, "model_dump") else block
+                for block in content
+            ]
+
+        # 否则，如果是列表，提取所有 text 类型的块
         text_parts = []
         for block in content:
             if isinstance(block, dict):
@@ -167,10 +199,11 @@ class AnthropicAdapter(BaseAdapter):
         将内部统一格式转换为 Anthropic 响应格式（非流式）
 
         主要处理：
-        1. content 包装为数组格式（可包含 text 和 thinking 类型）
+        1. content 包装为数组格式（可包含 text、thinking、tool_use 类型）
         2. reasoning_content → thinking content block 转换
-        3. finish_reason → stop_reason 映射
-        4. usage 字段格式转换
+        3. tool_calls → tool_use content blocks 转换
+        4. finish_reason → stop_reason 映射
+        5. usage 字段格式转换
 
         Args:
             internal_response: 内部格式响应字典
@@ -191,13 +224,54 @@ class AnthropicAdapter(BaseAdapter):
                 )
             )
 
-        # 添加文本内容 block
-        content_blocks.append(
-            TextContentBlock(
-                type="text",
-                text=internal_response.get("content", ""),
+        # 新增：处理工具调用（OpenAI 格式 → Anthropic 格式）
+        if internal_response.get("tool_calls"):
+            from proxy_app.models.anthropic_models import ToolUseContentBlock
+            import json
+
+            for tool_call in internal_response["tool_calls"]:
+                # OpenAI 格式：
+                # {
+                #   "id": "call_123",
+                #   "type": "function",
+                #   "function": {
+                #     "name": "get_weather",
+                #     "arguments": '{"location": "Paris"}'
+                #   }
+                # }
+                # Anthropic 格式：
+                # {
+                #   "type": "tool_use",
+                #   "id": "call_123",
+                #   "name": "get_weather",
+                #   "input": {"location": "Paris"}
+                # }
+
+                # 解析 JSON 格式的 arguments
+                arguments_str = tool_call["function"]["arguments"]
+                try:
+                    input_obj = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                except json.JSONDecodeError:
+                    # 如果解析失败，使用空对象
+                    input_obj = {}
+
+                tool_use_block = ToolUseContentBlock(
+                    type="tool_use",
+                    id=tool_call["id"],
+                    name=tool_call["function"]["name"],
+                    input=input_obj,
+                )
+                content_blocks.append(tool_use_block)
+
+        # 添加文本内容 block（如果有）
+        if internal_response.get("content"):
+            from proxy_app.models.anthropic_models import TextContentBlock
+            content_blocks.append(
+                TextContentBlock(
+                    type="text",
+                    text=internal_response["content"],
+                )
             )
-        )
 
         # 映射 finish_reason → stop_reason
         stop_reason = self._map_finish_reason(internal_response.get("finish_reason"))
@@ -205,6 +279,7 @@ class AnthropicAdapter(BaseAdapter):
         # 构建 usage
         usage = None
         if internal_response.get("usage"):
+            from proxy_app.models.anthropic_models import AnthropicUsage
             usage_data = internal_response["usage"]
             usage = AnthropicUsage(
                 input_tokens=usage_data["prompt_tokens"],
@@ -234,16 +309,19 @@ class AnthropicAdapter(BaseAdapter):
            content_block_stop, message_delta, message_stop
         2. 每个事件格式：event: {type}\ndata: {JSON}\n\n
 
-        事件序列（有推理内容时）：
+        事件序列（包含工具调用时）：
         1. message_start - 消息开始
-        2. content_block_start - thinking block 开始（索引 0）
+        2. content_block_start - thinking block 开始（索引 0，如果有）
         3. content_block_delta - 多个 thinking 增量
         4. content_block_stop - thinking block 结束
-        5. content_block_start - text block 开始（索引 1）
-        6. content_block_delta - 多个 text 增量
-        7. content_block_stop - text block 结束
-        8. message_delta - 消息增量（stop_reason 和 usage）
-        9. message_stop - 消息结束
+        5. content_block_start - tool_use block 开始（索引 1，如果有）
+        6. content_block_delta - tool_use 参数增量
+        7. content_block_stop - tool_use block 结束
+        8. content_block_start - text block 开始（索引 2，如果有）
+        9. content_block_delta - 多个 text 增量
+        10. content_block_stop - text block 结束
+        11. message_delta - 消息增量（stop_reason 和 usage）
+        12. message_stop - 消息结束
 
         Args:
             internal_stream: 内部格式的异步生成器
@@ -264,6 +342,10 @@ class AnthropicAdapter(BaseAdapter):
 
         # 当前 content block 索引
         current_block_index = 0
+
+        # 新增：工具调用相关状态
+        # key: tool_index, value: {"id": "...", "name": "...", "arguments": "...", "started": bool, "stopped": bool}
+        tool_call_buffers = {}
 
         # 逐个处理内部流式块
         async for chunk in internal_stream:
@@ -319,6 +401,79 @@ class AnthropicAdapter(BaseAdapter):
                     },
                 )
 
+            # 新增：处理工具调用（tool_use blocks）
+            if chunk.get("delta_tool_calls"):
+                import json
+
+                # 如果 thinking block 已开始但未结束，先结束它
+                if thinking_block_started and not thinking_block_stopped:
+                    yield self._format_sse_event(
+                        "content_block_stop",
+                        {"type": "content_block_stop", "index": current_block_index},
+                    )
+                    thinking_block_stopped = True
+                    current_block_index += 1
+
+                for tool_call_delta in chunk["delta_tool_calls"]:
+                    tool_index = tool_call_delta.get("index", 0)
+
+                    # 初始化工具调用缓存
+                    if tool_index not in tool_call_buffers:
+                        tool_call_buffers[tool_index] = {
+                            "id": "",
+                            "name": "",
+                            "arguments": "",
+                            "started": False,
+                            "stopped": False,
+                            "block_index": current_block_index,
+                        }
+                        current_block_index += 1
+
+                    tool_buffer = tool_call_buffers[tool_index]
+
+                    # 累积工具调用数据
+                    if "id" in tool_call_delta:
+                        tool_buffer["id"] = tool_call_delta["id"]
+
+                    if "function" in tool_call_delta:
+                        func = tool_call_delta["function"]
+                        if "name" in func:
+                            tool_buffer["name"] = func["name"]
+                        if "arguments" in func:
+                            tool_buffer["arguments"] += func["arguments"]
+
+                    # 如果有 name 且还未开始，发送 content_block_start
+                    if tool_buffer["name"] and not tool_buffer["started"]:
+                        yield self._format_sse_event(
+                            "content_block_start",
+                            {
+                                "type": "content_block_start",
+                                "index": tool_buffer["block_index"],
+                                "content_block": {
+                                    "type": "tool_use",
+                                    "id": tool_buffer["id"],
+                                    "name": tool_buffer["name"],
+                                    "input": {},
+                                },
+                            },
+                        )
+                        tool_buffer["started"] = True
+
+                    # 如果有 arguments 增量，发送 content_block_delta
+                    if "function" in tool_call_delta and "arguments" in tool_call_delta["function"]:
+                        args_delta = tool_call_delta["function"]["arguments"]
+                        yield self._format_sse_event(
+                            "content_block_delta",
+                            {
+                                "type": "content_block_delta",
+                                "index": tool_buffer["block_index"],
+                                "delta": {
+                                    "type": "input_json_delta",
+                                    "partial_json": args_delta,
+                                },
+                            },
+                        )
+
             # 处理文本内容（text block）
             if chunk.get("delta_content"):
                 # 如果 thinking block 已开始但未结束，先结束它
@@ -329,6 +484,15 @@ class AnthropicAdapter(BaseAdapter):
                     )
                     thinking_block_stopped = True
                     current_block_index += 1
+
+                # 如果有未结束的工具调用，先结束它们
+                for tool_buffer in tool_call_buffers.values():
+                    if tool_buffer["started"] and not tool_buffer["stopped"]:
+                        yield self._format_sse_event(
+                            "content_block_stop",
+                            {"type": "content_block_stop", "index": tool_buffer["block_index"]},
+                        )
+                        tool_buffer["stopped"] = True
 
                 # 发送 text block start（只发送一次）
                 if not text_block_started:
@@ -361,8 +525,18 @@ class AnthropicAdapter(BaseAdapter):
                         "content_block_stop",
                         {"type": "content_block_stop", "index": current_block_index},
                     )
-                elif text_block_started:
-                    # 结束 text block
+
+                # 结束所有未结束的工具调用
+                for tool_buffer in tool_call_buffers.values():
+                    if tool_buffer["started"] and not tool_buffer["stopped"]:
+                        yield self._format_sse_event(
+                            "content_block_stop",
+                            {"type": "content_block_stop", "index": tool_buffer["block_index"]},
+                        )
+                        tool_buffer["stopped"] = True
+
+                # 结束 text block
+                if text_block_started:
                     yield self._format_sse_event(
                         "content_block_stop",
                         {"type": "content_block_stop", "index": current_block_index},
@@ -419,7 +593,7 @@ class AnthropicAdapter(BaseAdapter):
         映射关系：
         - stop → end_turn
         - length → max_tokens
-        - tool_calls → end_turn
+        - tool_calls → tool_use（新增：工具调用结束）
         - content_filter → end_turn
         - None → None
 
@@ -435,7 +609,7 @@ class AnthropicAdapter(BaseAdapter):
         mapping = {
             "stop": "end_turn",
             "length": "max_tokens",
-            "tool_calls": "end_turn",
+            "tool_calls": "tool_use",  # 新增：映射工具调用
             "content_filter": "end_turn",
         }
 

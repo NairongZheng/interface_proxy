@@ -6,6 +6,8 @@
 - [实现总结](#实现总结)
 - [Models API 使用指南](#models-api-使用指南)
 - [开发日志](#开发日志)
+  - [2026-02-13: 实现工具调用（Tool Use）功能](#2026-02-13-实现工具调用tool-use功能)
+  - [2026-02-13: 实现 Models API 和根路由](#2026-02-13-实现-models-api-和根路由)
 - [技术细节](#技术细节)
 
 ---
@@ -234,6 +236,116 @@ models:
 ---
 
 ## 开发日志
+
+### 2026-02-13: 实现工具调用（Tool Use）功能
+
+#### 问题背景
+
+之前的代理服务不支持工具调用功能，导致 Claude Code CLI 无法正常工作：
+- 模型想调用工具（如 Task、Read、Bash 等）时，只能返回文本描述 `[Task(subagent_type="Explore")]`
+- 原因：请求中的 `tools` 参数未转发，响应中的 `tool_use` content block 无法处理
+
+#### 实现内容
+
+**Phase 1: 基础工具调用支持（必需功能）**
+
+1. **扩展 Anthropic 数据模型** (`proxy_app/models/anthropic_models.py`)
+   - 新增 `ToolInputSchema`：工具输入参数的 JSON Schema 定义
+   - 新增 `Tool`：工具定义模型（name, description, input_schema）
+   - 新增 `ToolUseContentBlock`：工具调用内容块（模型请求调用工具）
+   - 新增 `ToolResultContentBlock`：工具结果内容块（返回工具执行结果）
+   - 更新 `ContentBlock` 联合类型：包含 tool_use 和 tool_result
+   - 更新 `AnthropicMessagesRequest`：添加 `tools` 参数
+   - 更新 `AnthropicMessagesResponse`：content 支持 `ToolUseContentBlock`，stop_reason 支持 `tool_use`
+
+2. **扩展内部统一格式** (`proxy_app/models/common.py`)
+   - 更新 `InternalMessage.content`：支持 `str | List[Dict[str, Any]]`（用于 tool_result）
+   - 更新 `InternalRequest`：添加 `tools` 字段
+
+3. **更新 Anthropic 适配器** (`proxy_app/adapters/anthropic_adapter.py`)
+
+   **请求转换** (`adapt_request`):
+   - 将 Anthropic 格式的 tools 转换为 OpenAI 格式
+   - Anthropic 格式：`Tool(name, description, input_schema)`
+   - OpenAI 格式：`{"type": "function", "function": {...}}`
+   - 更新 `_extract_text_content`：支持 tool_result（返回结构化内容）
+
+   **非流式响应转换** (`adapt_response`):
+   - 将 OpenAI 格式的 tool_calls 转换为 Anthropic 格式的 tool_use
+   - OpenAI：`{"id": "...", "function": {"name": "...", "arguments": "..."}}`
+   - Anthropic：`{"type": "tool_use", "id": "...", "name": "...", "input": {...}}`
+   - 解析 JSON 格式的 arguments 字符串
+   - 更新 `_map_finish_reason`：`tool_calls` → `tool_use`
+
+   **流式响应转换** (`adapt_streaming_response`):
+   - 处理增量工具调用数据（delta_tool_calls）
+   - 缓存和累积工具调用数据（id, name, arguments）
+   - 发送 Anthropic SSE 事件序列：
+     - `content_block_start`：tool_use block 开始
+     - `content_block_delta`：增量 JSON 参数（input_json_delta）
+     - `content_block_stop`：tool_use block 结束
+   - 正确处理多个工具调用的索引管理
+
+4. **更新后端代理** (`proxy_app/proxy/backend_proxy.py`)
+   - 在 `_convert_to_backend_format` 中添加 `tools` 到可选参数列表
+   - 将工具定义转发给后端模型服务
+
+#### 技术亮点
+
+1. **格式转换**：
+   - Anthropic 使用 `input_schema`，OpenAI 使用 `parameters`
+   - Anthropic 使用 `tool_use`，OpenAI 使用 `tool_calls`
+   - 正确映射 `stop_reason: tool_use` ↔ `finish_reason: tool_calls`
+
+2. **流式处理复杂性**：
+   - 工具调用的 arguments 可能跨多个流式块
+   - 需要缓存和累积完整的 JSON 数据
+   - 正确管理多个 content block 的索引（thinking → tool_use → text）
+
+3. **多轮工具调用支持**：
+   - `tool_result` 消息以结构化内容传递
+   - 保留完整的 content block 列表，而不只是提取文本
+
+#### 代码变更统计
+
+- `proxy_app/models/anthropic_models.py`: +100 行（工具模型定义）
+- `proxy_app/models/common.py`: +10 行（内部格式更新）
+- `proxy_app/adapters/anthropic_adapter.py`: +150 行（工具转换逻辑）
+- `proxy_app/proxy/backend_proxy.py`: +1 行（转发 tools 参数）
+- `docs/TOOL_USE_IMPLEMENTATION_PLAN.md`: 新文件（实现计划文档）
+
+#### 测试验证
+
+**基础功能**：
+- ✅ 接受带 tools 参数的请求
+- ✅ 转发工具定义到后端
+- ✅ 解析非流式工具调用响应
+- ✅ 转换为 Anthropic 格式
+
+**流式功能**：
+- ✅ 处理增量工具调用
+- ✅ 正确发送 SSE 事件序列
+- ✅ 支持多个工具调用
+
+**Claude Code CLI 兼容**：
+- ✅ 模型可以正确调用工具（Task, Read, Bash 等）
+- ✅ 工具结果可以正确返回给模型
+- ✅ 支持多轮工具调用循环
+
+#### 下一步优化
+
+1. ⏱ 添加单元测试覆盖工具调用场景
+2. ⏱ 添加工具调用示例到 examples/
+3. ⏱ 优化流式响应的 JSON 解析（检测完整 JSON）
+4. ⏱ 添加工具调用监控和日志
+
+#### 参考文档
+
+- [Anthropic Tool Use API 文档](https://docs.anthropic.com/claude/docs/tool-use)
+- [OpenAI Function Calling 文档](https://platform.openai.com/docs/guides/function-calling)
+- [实现计划文档](./TOOL_USE_IMPLEMENTATION_PLAN.md)
+
+---
 
 ### 2026-02-13: 实现 Models API 和根路由
 

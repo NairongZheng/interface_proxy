@@ -153,6 +153,7 @@ class BackendProxy:
             "frequency_penalty",
             "n",
             "user",
+            "tools",  # 新增：转发工具定义到后端
         ]
 
         for param in optional_params:
