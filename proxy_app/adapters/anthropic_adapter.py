@@ -15,6 +15,7 @@ from proxy_app.models.anthropic_models import (
     AnthropicMessagesResponse,
     AnthropicUsage,
     ContentBlock,
+    SystemContentBlock,
     TextContentBlock,
 )
 from proxy_app.models.common import (
@@ -56,11 +57,16 @@ class AnthropicAdapter(BaseAdapter):
         internal_messages: List[InternalMessage] = []
 
         # 处理 system 字段
-        # Anthropic 的 system 是独立字段，我们需要转为 system 角色的消息
+        # Anthropic 的 system 可以是：
+        # 1. 字符串（旧格式）
+        # 2. 内容块数组（新格式，支持 prompt caching）
         if request_data.system:
+            # 提取文本内容
+            system_text = self._extract_system_content(request_data.system)
+
             system_msg: InternalMessage = {
                 "role": "system",
-                "content": request_data.system,
+                "content": system_text,
             }
             internal_messages.append(system_msg)
 
@@ -111,6 +117,41 @@ class AnthropicAdapter(BaseAdapter):
         # 如果是列表，提取所有 text 类型的块
         text_parts = []
         for block in content:
+            if isinstance(block, dict):
+                # 字典格式
+                if block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            elif hasattr(block, "type") and block.type == "text":
+                # Pydantic 模型格式
+                text_parts.append(block.text)
+
+        return "\n".join(text_parts)
+
+    def _extract_system_content(self, system: str | List[SystemContentBlock]) -> str:
+        """
+        从 system 参数中提取文本内容
+
+        system 可以是两种格式：
+        1. 字符串（旧格式）- 直接返回
+        2. 内容块数组（新格式，支持 prompt caching）- 提取所有 text 块
+
+        注意：
+        - cache_control 信息会被忽略（因为大多数后端不支持 prompt caching）
+        - 如果需要支持 cache_control，需要在后端代理中实现相关逻辑
+
+        Args:
+            system: system 参数（字符串或内容块数组）
+
+        Returns:
+            提取的纯文本
+        """
+        # 如果是字符串，直接返回
+        if isinstance(system, str):
+            return system
+
+        # 如果是列表，提取所有 text 块
+        text_parts = []
+        for block in system:
             if isinstance(block, dict):
                 # 字典格式
                 if block.get("type") == "text":

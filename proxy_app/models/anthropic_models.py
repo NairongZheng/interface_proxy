@@ -70,6 +70,28 @@ class ThinkingContentBlock(BaseModel):
 ContentBlock = Union[TextContentBlock, ImageContentBlock, ThinkingContentBlock]
 
 
+class SystemTextBlock(BaseModel):
+    """
+    System 提示文本块
+
+    用于 system 参数的数组格式，支持 prompt caching。
+    Anthropic API 在支持 prompt caching 功能后，扩展了 system 参数的格式，
+    允许将 system 提示分成多个文本块，每个块可以独立配置缓存控制。
+
+    Attributes:
+        type: 内容类型（text）
+        text: 文本内容
+        cache_control: 缓存控制（可选），例如: {"type": "ephemeral"}
+    """
+    type: Literal["text"] = "text"
+    text: str
+    cache_control: Optional[Dict[str, Any]] = None
+
+
+# System 内容块类型（目前只支持 text 类型）
+SystemContentBlock = SystemTextBlock
+
+
 # ==================== 消息相关模型 ====================
 
 class AnthropicMessage(BaseModel):
@@ -95,6 +117,9 @@ class AnthropicMessagesRequest(BaseModel):
         messages: 消息列表
         max_tokens: 最大生成 token 数（必需）
         system: 系统提示（可选，独立于 messages）
+                支持两种格式：
+                1. 字符串格式（旧格式）：简单的字符串
+                2. 内容块数组格式（新格式）：支持 prompt caching
         temperature: 温度参数（0-1），控制随机性
         top_p: nucleus sampling 参数（0-1）
         top_k: top-k sampling 参数
@@ -105,7 +130,7 @@ class AnthropicMessagesRequest(BaseModel):
     model: str
     messages: List[AnthropicMessage]
     max_tokens: int = Field(..., ge=1)  # 必需参数
-    system: Optional[str] = None
+    system: Optional[Union[str, List[SystemContentBlock]]] = None
     temperature: Optional[float] = Field(default=1.0, ge=0, le=1)
     top_p: Optional[float] = Field(default=None, ge=0, le=1)
     top_k: Optional[int] = Field(default=None, ge=1)
@@ -153,7 +178,7 @@ class AnthropicMessagesResponse(BaseModel):
     model: str
     stop_reason: Optional[Literal["end_turn", "max_tokens", "stop_sequence"]] = None
     stop_sequence: Optional[str] = None
-    usage: AnthropicUsage
+    usage: Optional[AnthropicUsage] = None
 
 
 # ==================== 流式响应事件模型 ====================
