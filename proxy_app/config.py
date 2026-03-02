@@ -5,7 +5,7 @@
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import yaml
 
@@ -53,9 +53,25 @@ class Config:
     # ==================== 后端服务配置 ====================
 
     @property
+    def backend_type(self) -> str:
+        """
+        获取后端类型
+
+        Returns:
+            后端类型：'standard'（标准OpenAI）, 'ptu'（PTU Gateway）, 'both'（两者都启用）
+            默认为 'both'
+        """
+        return self._config["backend"].get("type", "both")
+
+    @property
     def backend_url(self) -> str:
         """获取后端服务地址（例如：http://127.0.0.1:8000）"""
         return self._config["backend"]["url"]
+
+    @property
+    def backend_api_key(self) -> Optional[str]:
+        """获取后端 API Key（用于认证）"""
+        return self._config["backend"].get("api_key")
 
     @property
     def backend_timeout(self) -> float:
@@ -112,6 +128,86 @@ class Config:
             模型配置列表，每个模型包含 id, owned_by, created 字段
         """
         return self._config.get("models", {}).get("available_models", [])
+
+    # ==================== PTU 后端配置 ====================
+
+    @property
+    def ptu_models(self) -> list:
+        """
+        获取 PTU 模型列表
+
+        Returns:
+            PTU 模型名称列表
+        """
+        return self._config.get("ptu", {}).get("models", [])
+
+    @property
+    def ptu_backend_url(self) -> Optional[str]:
+        """
+        获取 PTU 后端 URL
+
+        如果配置中指定了 ptu.backend_url，则使用指定值；
+        否则使用默认的 backend.url
+
+        Returns:
+            PTU 后端 URL
+        """
+        ptu_url = self._config.get("ptu", {}).get("backend_url")
+        # 如果 ptu_url 是 None，返回默认的 backend_url
+        return ptu_url if ptu_url is not None else self.backend_url
+
+    def is_ptu_model(self, model: str) -> bool:
+        """
+        判断模型是否应该使用 PTU 后端
+
+        根据 backend.type 配置决定：
+        - 'standard': 总是返回 False（不使用 PTU）
+        - 'ptu': 总是返回 True（所有模型都使用 PTU）
+        - 'both': 检查模型是否在 ptu.models 列表中
+
+        Args:
+            model: 模型名称
+
+        Returns:
+            True 表示使用 PTU 后端，False 表示使用标准后端
+        """
+        backend_type = self.backend_type
+
+        if backend_type == "standard":
+            # 只使用标准后端，不使用 PTU
+            return False
+        elif backend_type == "ptu":
+            # 所有模型都使用 PTU
+            return True
+        else:  # backend_type == "both"
+            # 根据模型列表判断
+            return model in self.ptu_models
+
+    def get_available_models_by_backend(self) -> list:
+        """
+        根据启用的后端类型，返回可用的模型列表
+
+        根据 backend.type 配置过滤：
+        - 'standard': 只返回非 PTU 模型
+        - 'ptu': 只返回 PTU 模型
+        - 'both': 返回所有配置的模型
+
+        Returns:
+            过滤后的模型配置列表
+        """
+        all_models = self.available_models
+        backend_type = self.backend_type
+        ptu_model_ids = set(self.ptu_models)
+
+        if backend_type == "standard":
+            # 只返回非 PTU 模型
+            return [m for m in all_models if m["id"] not in ptu_model_ids]
+        elif backend_type == "ptu":
+            # 只返回 PTU 模型
+            return [m for m in all_models if m["id"] in ptu_model_ids]
+        else:  # backend_type == "both"
+            # 返回所有模型
+            return all_models
 
     def __repr__(self) -> str:
         """返回配置的字符串表示"""

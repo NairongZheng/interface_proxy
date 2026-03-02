@@ -265,3 +265,246 @@ class OpenAIAdapter(BaseAdapter):
     def get_format_name(self) -> str:
         """获取格式名称"""
         return "openai"
+
+    async def forward(self, internal_request: InternalRequest) -> InternalResponse:
+        """
+        转发请求到标准 OpenAI 后端（非流式）
+
+        流程：
+        1. 构造 OpenAI 请求格式
+        2. 调用 /v1/chat/completions API
+        3. 解析响应为内部格式
+
+        Args:
+            internal_request: 内部统一格式的请求
+
+        Returns:
+            内部统一格式的响应
+
+        Raises:
+            Exception: 后端调用失败
+        """
+        from proxy_app.utils.logger import logger
+
+        # 构造 OpenAI 请求
+        openai_request = self._build_openai_request(internal_request)
+
+        # 调用 OpenAI 后端
+        client = await self.get_client()
+        url = f"{self.backend_url}/v1/chat/completions"
+        headers = {"Content-Type": "application/json"}
+
+        # 添加 API Key（如果有）
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        logger.info(f"调用 OpenAI 后端: {url}")
+        logger.debug(f"OpenAI 请求参数: model={openai_request['model']}")
+
+        try:
+            response = await client.post(url, json=openai_request, headers=headers)
+            response.raise_for_status()
+            openai_response = response.json()
+
+            logger.debug(f"OpenAI 响应状态码: {response.status_code}")
+
+            # 解析为内部格式
+            return self._parse_openai_response(openai_response)
+
+        except Exception as e:
+            logger.error(f"OpenAI 后端调用失败: {e}", exc_info=True)
+            raise
+
+    async def forward_stream(
+        self, internal_request: InternalRequest
+    ) -> AsyncGenerator[InternalStreamChunk, None]:
+        """
+        转发请求到标准 OpenAI 后端（流式）
+
+        流程：
+        1. 构造 OpenAI 请求格式（stream=true）
+        2. 调用 /v1/chat/completions API
+        3. 逐块解析 SSE 响应
+        4. 转换为内部流式格式
+
+        Args:
+            internal_request: 内部统一格式的请求
+
+        Yields:
+            内部统一格式的流式响应块
+
+        Raises:
+            Exception: 后端调用失败
+        """
+        from proxy_app.utils.logger import logger
+
+        # 构造 OpenAI 请求
+        openai_request = self._build_openai_request(internal_request)
+
+        # 调用 OpenAI 后端（流式）
+        client = await self.get_client()
+        url = f"{self.backend_url}/v1/chat/completions"
+        headers = {"Content-Type": "application/json"}
+
+        # 添加 API Key（如果有）
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        logger.info(f"调用 OpenAI 后端（流式）: {url}")
+        logger.debug(f"OpenAI 请求参数: model={openai_request['model']}, stream=true")
+
+        try:
+            async with client.stream("POST", url, json=openai_request, headers=headers) as response:
+                response.raise_for_status()
+
+                # 读取 SSE 流
+                async for line in response.aiter_lines():
+                    line = line.strip()
+
+                    # 跳过空行和注释
+                    if not line or line.startswith(":"):
+                        continue
+
+                    # 解析 SSE 格式：data: {...}
+                    if line.startswith("data: "):
+                        data_str = line[6:]  # 去掉 "data: " 前缀
+
+                        # 检查结束标记
+                        if data_str == "[DONE]":
+                            logger.debug("OpenAI 流式响应结束")
+                            break
+
+                        try:
+                            # 解析 JSON 数据
+                            openai_chunk = json.loads(data_str)
+
+                            # 解析为内部流式格式
+                            internal_chunk = self._parse_openai_stream_chunk(openai_chunk)
+
+                            yield internal_chunk
+
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"解析 OpenAI 流式数据失败: {e}, data: {data_str}")
+                            continue
+
+        except Exception as e:
+            logger.error(f"OpenAI 流式调用失败: {e}", exc_info=True)
+            raise
+
+    def _build_openai_request(self, internal_request: InternalRequest) -> dict:
+        """
+        构造标准 OpenAI 请求格式
+
+        Args:
+            internal_request: 内部统一格式的请求
+
+        Returns:
+            OpenAI 格式的请求字典
+        """
+        openai_request = {
+            "model": internal_request["model"],
+            "messages": internal_request["messages"],
+        }
+
+        # 可选参数
+        if "stream" in internal_request:
+            openai_request["stream"] = internal_request["stream"]
+        if "temperature" in internal_request and internal_request["temperature"] is not None:
+            openai_request["temperature"] = internal_request["temperature"]
+        if "max_tokens" in internal_request and internal_request["max_tokens"] is not None:
+            openai_request["max_tokens"] = internal_request["max_tokens"]
+        if "top_p" in internal_request and internal_request["top_p"] is not None:
+            openai_request["top_p"] = internal_request["top_p"]
+        if "stop" in internal_request and internal_request["stop"]:
+            openai_request["stop"] = internal_request["stop"]
+        if "presence_penalty" in internal_request and internal_request["presence_penalty"] is not None:
+            openai_request["presence_penalty"] = internal_request["presence_penalty"]
+        if "frequency_penalty" in internal_request and internal_request["frequency_penalty"] is not None:
+            openai_request["frequency_penalty"] = internal_request["frequency_penalty"]
+        if "n" in internal_request and internal_request["n"]:
+            openai_request["n"] = internal_request["n"]
+        if "user" in internal_request and internal_request["user"]:
+            openai_request["user"] = internal_request["user"]
+
+        return openai_request
+
+    def _parse_openai_response(self, openai_response: dict) -> InternalResponse:
+        """
+        解析 OpenAI 格式响应为内部格式
+
+        Args:
+            openai_response: OpenAI 格式的响应
+
+        Returns:
+            内部统一格式的响应
+        """
+        # 提取关键信息
+        choices = openai_response.get("choices", [])
+        if not choices:
+            raise ValueError("OpenAI 响应缺少 choices 字段")
+
+        first_choice = choices[0]
+        message = first_choice.get("message", {})
+
+        # 构造内部格式
+        internal_response: InternalResponse = {
+            "id": openai_response.get("id", "unknown"),
+            "created": openai_response.get("created", int(time.time())),
+            "model": openai_response.get("model", "unknown"),
+            "role": message.get("role", "assistant"),
+            "content": message.get("content", ""),
+            "finish_reason": first_choice.get("finish_reason"),
+            "usage": openai_response.get("usage", {}),
+        }
+
+        # 可选字段
+        if "reasoning_content" in message:
+            internal_response["reasoning_content"] = message["reasoning_content"]
+        if "tool_calls" in message:
+            internal_response["tool_calls"] = message["tool_calls"]
+
+        return internal_response
+
+    def _parse_openai_stream_chunk(self, openai_chunk: dict) -> InternalStreamChunk:
+        """
+        解析 OpenAI 流式响应块为内部格式
+
+        Args:
+            openai_chunk: OpenAI 格式的流式响应块
+
+        Returns:
+            内部统一格式的流式响应块
+        """
+        choices = openai_chunk.get("choices", [])
+        if not choices:
+            return {
+                "id": openai_chunk.get("id", "unknown"),
+                "created": openai_chunk.get("created", int(time.time())),
+                "model": openai_chunk.get("model", "unknown"),
+                "delta_content": None,
+                "delta_role": None,
+                "finish_reason": None,
+            }
+
+        first_choice = choices[0]
+        delta = first_choice.get("delta", {})
+
+        # 构造内部流式格式
+        internal_chunk: InternalStreamChunk = {
+            "id": openai_chunk.get("id", "unknown"),
+            "created": openai_chunk.get("created", int(time.time())),
+            "model": openai_chunk.get("model", "unknown"),
+            "delta_content": delta.get("content"),
+            "delta_role": delta.get("role"),
+            "finish_reason": first_choice.get("finish_reason"),
+        }
+
+        # 可选字段
+        if "reasoning_content" in delta:
+            internal_chunk["delta_reasoning_content"] = delta["reasoning_content"]
+        if "tool_calls" in delta:
+            internal_chunk["delta_tool_calls"] = delta["tool_calls"]
+        if "usage" in openai_chunk:
+            internal_chunk["usage"] = openai_chunk["usage"]
+
+        return internal_chunk

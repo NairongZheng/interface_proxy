@@ -39,6 +39,8 @@ class BackendProxy:
         timeout: float = 600.0,
         max_connections: int = 100,
         max_keepalive_connections: int = 20,
+        ptu_backend_url: Optional[str] = None,
+        api_key: Optional[str] = None,
     ):
         """
         初始化后端代理
@@ -48,9 +50,14 @@ class BackendProxy:
             timeout: 请求超时时间（秒）
             max_connections: 连接池最大连接数
             max_keepalive_connections: 连接池最大保活连接数
+            ptu_backend_url: PTU 后端服务地址（如果与标准后端不同）
+            api_key: 后端 API Key（用于认证）
         """
         self.backend_url = backend_url.rstrip("/")  # 移除末尾的斜杠
+        # 如果没有指定 PTU 后端 URL，则使用标准后端 URL
+        self.ptu_backend_url = (ptu_backend_url or backend_url).rstrip("/")
         self.timeout = timeout
+        self.api_key = api_key
 
         # 初始化 httpx 异步客户端和连接池
         self._http_client = httpx.AsyncClient(
@@ -63,19 +70,25 @@ class BackendProxy:
 
         logger.info(
             f"后端代理已初始化: backend_url={backend_url}, "
+            f"ptu_backend_url={self.ptu_backend_url}, "
             f"timeout={timeout}s, max_connections={max_connections}"
         )
 
     async def forward(
-        self, internal_request: InternalRequest
+        self, internal_request: InternalRequest, adapter: Any = None
     ) -> InternalResponse | AsyncGenerator[InternalStreamChunk, None]:
         """
         转发请求到后端服务（主入口）
+
+        根据适配器类型自动选择后端：
+        - PTUAdapter: 调用 PTU 后端，处理包装格式
+        - 其他: 调用标准后端
 
         根据请求的 stream 参数决定使用流式或非流式处理
 
         Args:
             internal_request: 内部统一格式的请求
+            adapter: 适配器实例，用于判断后端类型
 
         Returns:
             如果是非流式：返回内部格式响应字典
@@ -95,9 +108,9 @@ class BackendProxy:
 
         # 根据 stream 参数选择处理方式
         if is_stream:
-            return self._forward_streaming(internal_request)
+            return self._forward_streaming(internal_request, adapter)
         else:
-            return await self._forward_non_streaming(internal_request)
+            return await self._forward_non_streaming(internal_request, adapter)
 
     def _convert_to_backend_format(self, internal_request: InternalRequest) -> Dict[str, Any]:
         """
@@ -163,14 +176,58 @@ class BackendProxy:
 
         return backend_request
 
+    def _build_ptu_request(self, internal_request: InternalRequest) -> Dict[str, Any]:
+        """
+        构造 PTU 请求，添加 PTU 特有参数
+
+        PTU 请求格式：
+        {
+          "messages": [...],
+          "model": "...",
+          "channel_code": "doubao|ali|azure",
+          "transaction_id": "user-model-timestamp",
+          ...其他 OpenAI 参数
+        }
+
+        Args:
+            internal_request: 内部统一格式的请求
+
+        Returns:
+            PTU 后端请求字典
+        """
+        # 延迟导入 PTUAdapter 避免循环依赖
+        from proxy_app.adapters.ptu_adapter import PTUAdapter
+
+        # 先转换为标准的后端格式（OpenAI 格式）
+        ptu_request = self._convert_to_backend_format(internal_request)
+
+        # 获取模型名称
+        model = internal_request["model"]
+
+        # 添加 PTU 特有参数
+        ptu_request["channel_code"] = PTUAdapter.infer_channel_code(model)
+        ptu_request["transaction_id"] = f"proxy-{model}-{int(time.time())}"
+
+        logger.debug(
+            f"构造 PTU 请求: channel_code={ptu_request['channel_code']}, "
+            f"transaction_id={ptu_request['transaction_id']}"
+        )
+
+        return ptu_request
+
     async def _forward_non_streaming(
-        self, internal_request: InternalRequest
+        self, internal_request: InternalRequest, adapter: Any = None
     ) -> InternalResponse:
         """
         处理非流式请求
 
+        根据适配器类型选择后端和处理逻辑：
+        - PTUAdapter: 调用 PTU 后端，解包 PTU 包装
+        - 其他: 调用标准后端
+
         Args:
             internal_request: 内部格式请求
+            adapter: 适配器实例
 
         Returns:
             内部格式响应
@@ -179,18 +236,35 @@ class BackendProxy:
             httpx.HTTPError: HTTP 请求失败
             ValueError: 响应格式错误
         """
-        # 转换为后端格式
-        backend_request = self._convert_to_backend_format(internal_request)
+        # 延迟导入 PTUAdapter 避免循环依赖
+        from proxy_app.adapters.ptu_adapter import PTUAdapter
 
-        # 构建后端 URL
-        backend_endpoint = f"{self.backend_url}/v1/chat/completions"
+        # 判断是否是 PTU 后端
+        is_ptu = isinstance(adapter, PTUAdapter)
+
+        # 根据后端类型构建请求
+        if is_ptu:
+            backend_request = self._build_ptu_request(internal_request)
+            backend_endpoint = f"{self.ptu_backend_url}/v1/chat/completions"
+            logger.info(f"调用 PTU 后端: {backend_endpoint}")
+        else:
+            backend_request = self._convert_to_backend_format(internal_request)
+            backend_endpoint = f"{self.backend_url}/v1/chat/completions"
+            logger.info(f"调用标准后端: {backend_endpoint}")
 
         try:
+            # 构建请求头
+            headers = {"Content-Type": "application/json"}
+            if self.api_key:
+                # 尝试同时设置多种认证头格式
+                headers["api-key"] = self.api_key
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
             # 发送 POST 请求到后端
             response = await self._http_client.post(
                 backend_endpoint,
                 json=backend_request,
-                headers={"Content-Type": "application/json"},
+                headers=headers,
             )
 
             # 检查响应状态
@@ -198,6 +272,11 @@ class BackendProxy:
 
             # 解析 JSON 响应
             backend_response = response.json()
+
+            # 如果是 PTU 后端，需要解包
+            if is_ptu:
+                logger.debug("解包 PTU 响应")
+                backend_response = PTUAdapter.unwrap_ptu_response(backend_response)
 
             # 转换为内部格式
             internal_response = self._parse_backend_response(backend_response)
@@ -215,18 +294,26 @@ class BackendProxy:
         except httpx.RequestError as e:
             logger.error(f"请求后端失败: {e}")
             raise
+        except ValueError as e:
+            logger.error(f"PTU 响应解包失败: {e}")
+            raise
         except Exception as e:
             logger.error(f"处理非流式请求时发生错误: {e}")
             raise
 
     async def _forward_streaming(
-        self, internal_request: InternalRequest
+        self, internal_request: InternalRequest, adapter: Any = None
     ) -> AsyncGenerator[InternalStreamChunk, None]:
         """
         处理流式请求
 
+        根据适配器类型选择后端和处理逻辑：
+        - PTUAdapter: 调用 PTU 后端（PTU 流式响应格式与标准 OpenAI 相同）
+        - 其他: 调用标准后端
+
         Args:
             internal_request: 内部格式请求
+            adapter: 适配器实例
 
         Yields:
             内部格式的流式块
@@ -235,19 +322,36 @@ class BackendProxy:
             httpx.HTTPError: HTTP 请求失败
             ValueError: 响应格式错误
         """
-        # 转换为后端格式
-        backend_request = self._convert_to_backend_format(internal_request)
+        # 延迟导入 PTUAdapter 避免循环依赖
+        from proxy_app.adapters.ptu_adapter import PTUAdapter
 
-        # 构建后端 URL
-        backend_endpoint = f"{self.backend_url}/v1/chat/completions"
+        # 判断是否是 PTU 后端
+        is_ptu = isinstance(adapter, PTUAdapter)
+
+        # 根据后端类型构建请求
+        if is_ptu:
+            backend_request = self._build_ptu_request(internal_request)
+            backend_endpoint = f"{self.ptu_backend_url}/v1/chat/completions"
+            logger.info(f"调用 PTU 后端（流式）: {backend_endpoint}")
+        else:
+            backend_request = self._convert_to_backend_format(internal_request)
+            backend_endpoint = f"{self.backend_url}/v1/chat/completions"
+            logger.info(f"调用标准后端（流式）: {backend_endpoint}")
 
         try:
+            # 构建请求头
+            headers = {"Content-Type": "application/json"}
+            if self.api_key:
+                # 尝试同时设置多种认证头格式
+                headers["api-key"] = self.api_key
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
             # 使用 stream 上下文管理器建立流式连接
             async with self._http_client.stream(
                 "POST",
                 backend_endpoint,
                 json=backend_request,
-                headers={"Content-Type": "application/json"},
+                headers=headers,
             ) as response:
                 # 检查响应状态
                 response.raise_for_status()
@@ -278,6 +382,9 @@ class BackendProxy:
                     except json.JSONDecodeError as e:
                         logger.warning(f"解析 JSON 块失败: {e}, data={data_str}")
                         continue
+
+                    # 如果是 PTU 后端，需要解包（但流式响应通常不需要解包，直接是 OpenAI 格式）
+                    # PTU 流式响应格式与标准 OpenAI 相同，无需额外处理
 
                     # 转换为内部格式
                     internal_chunk = self._parse_backend_chunk(chunk_data)

@@ -2,32 +2,34 @@
 
 接口代理服务，实现不同 LLM 接口格式之间的互相转换和转发。
 
-## 项目简介
+[![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Latest-green.svg)](https://fastapi.tiangolo.com/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-这是一个 LLM 接口代理服务，采用**适配器模式**设计，可以在不同的 API 格式之间自动转换。当后端模型服务（如 `127.0.0.1:8000`）提供 OpenAI `/v1/chat/completions` 接口时，代理服务可以在不同端口（如 `127.0.0.1:8080`）提供多种格式的接口：
+## 🌟 核心特性
 
-- **OpenAI 格式**：`/v1/chat/completions`（直接透传或增强）
-- **Anthropic 格式**：`/v1/messages`（自动转换）
-- **其他格式**：可扩展支持更多格式
+### 格式转换
 
-## 核心价值
+- ✅ **OpenAI ↔ Anthropic** 格式互转
+- ✅ **OpenAI → PTU** 自动识别和处理
+- ✅ **统一接口** 用标准 SDK 调用任何后端
+- ✅ **流式支持** 完整支持 SSE 流式响应
 
-**问题**：后端模型服务通常只实现一种 API 格式（如 OpenAI），但客户端可能使用不同的 SDK（Anthropic、Google 等）。
+### 高级功能
 
-**解决方案**：后端只需实现一种接口格式，代理服务自动提供多种格式支持，让客户端可以选择自己喜欢的 API 格式。
+- ✅ **推理内容支持** OpenAI o1 和 Anthropic Extended Thinking
+- ✅ **工具调用支持** 完整支持 Tool Use，兼容 Claude Code CLI
+- ✅ **多模型支持** 30+ PTU 模型（Doubao, DeepSeek, Qwen）
+- ✅ **自动路由** 根据模型自动选择后端
 
-## 功能特性
+### 架构优势
 
-✅ **格式转换**：OpenAI ↔ Anthropic 格式互转
-✅ **接口转发**：代理后端模型服务的请求
-✅ **流式支持**：支持流式和非流式两种模式
-✅ **推理内容支持**：完整支持 reasoning_content（OpenAI o1）和 thinking（Anthropic）
-✅ **工具调用支持**：完整支持 Tool Use 功能，兼容 Claude Code CLI
-✅ **模块化**：代码结构清晰，便于扩展新格式
-✅ **可配置**：通过 YAML 配置文件管理
-✅ **高性能**：基于 FastAPI + httpx 异步架构
+- ✅ **适配器模式** 清晰的职责分离，易于扩展
+- ✅ **异步架构** FastAPI + httpx，高性能
+- ✅ **配置驱动** YAML 配置，灵活管理
+- ✅ **对用户透明** 无需修改客户端代码
 
-## 快速开始
+## 🚀 快速开始
 
 ### 1. 安装依赖
 
@@ -40,26 +42,25 @@ pip install -r requirements.txt
 编辑 `config/config.yaml`：
 
 ```yaml
+# 后端服务配置
 backend:
-  url: "http://127.0.0.1:8000"  # 后端模型服务地址
+  url: "https://api.ppchat.vip"      # 标准 OpenAI 后端
+  api_key: "your-api-key"
   timeout: 600.0
-  max_connections: 100
 
-server:
-  host: "0.0.0.0"
-  port: 8080
-  log_level: "INFO"
+# PTU 后端配置
+ptu:
+  backend_url: "http://api.schedule.mtc.sensetime.com"  # PTU Gateway
+  models:
+    - "Doubao-1.5-pro-32k"
+    - "qwen3.5-plus"
+    - "DeepSeek-V3"
+    # ...
 
+# 路由配置
 routes:
   openai_enabled: true
   anthropic_enabled: true
-
-models:
-  available_models:
-    - id: "gpt-3.5-turbo"
-      owned_by: "openai"
-      created: 1677610602
-    # ... 更多模型配置
 ```
 
 ### 3. 启动服务
@@ -68,428 +69,56 @@ models:
 # 使用默认配置
 python proxy_server.py
 
-# 指定配置文件
-python proxy_server.py --config custom_config.yaml
-
-# 指定监听地址和端口
-python proxy_server.py --host 0.0.0.0 --port 8080
+# 指定端口
+python proxy_server.py --port 8080
 
 # 开发模式（自动重载）
 python proxy_server.py --reload
 ```
 
-### 4. 测试接口
+### 4. 测试服务
 
-**服务信息**：
+**查看服务信息**：
 
 ```bash
 curl http://127.0.0.1:8080/
 ```
 
-**健康检查**：
-
-```bash
-curl http://127.0.0.1:8080/health
-```
-
-**列出所有可用模型**：
+**列出可用模型**：
 
 ```bash
 curl http://127.0.0.1:8080/v1/models
 ```
 
-**获取特定模型信息**：
-
-```bash
-curl http://127.0.0.1:8080/v1/models/gpt-3.5-turbo
-```
-
-**OpenAI 格式（非流式）**：
-
-```bash
-curl -X POST http://127.0.0.1:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-3.5-turbo",
-    "messages": [{"role": "user", "content": "Hello"}],
-    "stream": false
-  }'
-```
-
-**OpenAI 格式（流式）**：
-
-```bash
-curl -X POST http://127.0.0.1:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-3.5-turbo",
-    "messages": [{"role": "user", "content": "Count to 10"}],
-    "stream": true
-  }'
-```
-
-**Anthropic 格式（非流式）**：
-
-```bash
-curl -X POST http://127.0.0.1:8080/v1/messages \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-3-opus-20240229",
-    "max_tokens": 1024,
-    "messages": [{"role": "user", "content": "Hello"}]
-  }'
-```
-
-**Anthropic 格式（流式）**：
-
-```bash
-curl -X POST http://127.0.0.1:8080/v1/messages \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-3-opus-20240229",
-    "max_tokens": 1024,
-    "messages": [{"role": "user", "content": "Count to 10"}],
-    "stream": true
-  }'
-```
-
-## API 文档
-
-### 服务信息 API
-
-**路径**：`GET /`
-
-**响应格式**：
-
-```json
-{
-  "service": "Interface Proxy Service",
-  "version": "1.0.0",
-  "description": "LLM 接口代理服务，支持 OpenAI 和 Anthropic 格式互转",
-  "endpoints": {
-    "health": "/health",
-    "openai_chat": "/v1/chat/completions",
-    "anthropic_messages": "/v1/messages",
-    "models_list": "/v1/models",
-    "model_detail": "/v1/models/{model_id}"
-  },
-  "backend_url": "http://127.0.0.1:8000"
-}
-```
-
-### Models API
-
-**列出所有模型**：`GET /v1/models`
-
-**响应格式**：
-
-```json
-{
-  "object": "list",
-  "data": [
-    {
-      "id": "gpt-3.5-turbo",
-      "object": "model",
-      "created": 1677610602,
-      "owned_by": "openai",
-      "permission": [...],
-      "root": "gpt-3.5-turbo",
-      "parent": null
-    },
-    ...
-  ]
-}
-```
-
-**获取特定模型**：`GET /v1/models/{model_id}`
-
-**响应格式**：
-
-```json
-{
-  "id": "gpt-3.5-turbo",
-  "object": "model",
-  "created": 1677610602,
-  "owned_by": "openai",
-  "permission": [...],
-  "root": "gpt-3.5-turbo",
-  "parent": null
-}
-```
-
-完整的开发文档请参考：[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-
-### OpenAI Chat Completions API
-
-**路径**：`POST /v1/chat/completions`
-
-**请求格式**：
-
-```json
-{
-  "model": "gpt-3.5-turbo",
-  "messages": [
-    {"role": "system", "content": "You are a helpful assistant."},
-    {"role": "user", "content": "Hello!"}
-  ],
-  "temperature": 0.7,
-  "max_tokens": 1024,
-  "stream": false
-}
-```
-
-**响应格式**（非流式）：
-
-```json
-{
-  "id": "chatcmpl-123",
-  "object": "chat.completion",
-  "created": 1677652288,
-  "model": "gpt-3.5-turbo",
-  "choices": [{
-    "index": 0,
-    "message": {
-      "role": "assistant",
-      "content": "Hello! How can I help you today?"
-    },
-    "finish_reason": "stop"
-  }],
-  "usage": {
-    "prompt_tokens": 10,
-    "completion_tokens": 20,
-    "total_tokens": 30
-  }
-}
-```
-
-**流式响应**：
-
-```
-data: {"id":"chatcmpl-123","choices":[{"delta":{"role":"assistant"},"index":0}]}
-
-data: {"id":"chatcmpl-123","choices":[{"delta":{"content":"Hello"},"index":0}]}
-
-data: {"id":"chatcmpl-123","choices":[{"delta":{"content":"!"},"index":0}]}
-
-data: [DONE]
-```
-
-### Anthropic Messages API
-
-**路径**：`POST /v1/messages`
-
-**请求格式**：
-
-```json
-{
-  "model": "claude-3-opus-20240229",
-  "max_tokens": 1024,
-  "system": "You are a helpful assistant.",
-  "messages": [
-    {"role": "user", "content": "Hello!"}
-  ],
-  "temperature": 0.7,
-  "stream": false
-}
-```
-
-**响应格式**（非流式）：
-
-```json
-{
-  "id": "msg_123",
-  "type": "message",
-  "role": "assistant",
-  "content": [
-    {"type": "text", "text": "Hello! How can I help you today?"}
-  ],
-  "model": "claude-3-opus-20240229",
-  "stop_reason": "end_turn",
-  "usage": {
-    "input_tokens": 10,
-    "output_tokens": 20
-  }
-}
-```
-
-**流式响应**：
-
-```
-event: message_start
-data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","content":[],"model":"claude-3-opus-20240229"}}
-
-event: content_block_start
-data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
-
-event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
-
-event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"!"}}
-
-event: content_block_stop
-data: {"type":"content_block_stop","index":0}
-
-event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":20}}
-
-event: message_stop
-data: {"type":"message_stop"}
-```
-
-### 推理内容支持（Reasoning Content）
-
-代理服务完整支持模型的推理过程输出：
-
-#### OpenAI o1 系列模型
-
-OpenAI 的 o1 系列模型（如 o1-preview, o1-mini）会在 `reasoning_content` 字段返回推理过程：
-
-**响应示例**：
-
-```json
-{
-  "id": "chatcmpl-123",
-  "object": "chat.completion",
-  "model": "o1-preview",
-  "choices": [{
-    "index": 0,
-    "message": {
-      "role": "assistant",
-      "content": "最终答案是 42。",
-      "reasoning_content": "首先我需要分析这个问题...\n然后考虑各种可能性...\n最终得出结论..."
-    },
-    "finish_reason": "stop"
-  }]
-}
-```
-
-**流式响应**：
-
-```
-data: {"choices":[{"delta":{"reasoning_content":"首先我需要"}}]}
-data: {"choices":[{"delta":{"reasoning_content":"分析..."}}]}
-data: {"choices":[{"delta":{"content":"最终答案"}}]}
-```
-
-#### Anthropic 的 Extended Thinking
-
-Anthropic 的 Claude 3.5 Sonnet 及更新模型支持 extended thinking 功能，使用 `thinking` content block：
-
-**响应示例**：
-
-```json
-{
-  "id": "msg_123",
-  "type": "message",
-  "role": "assistant",
-  "content": [
-    {
-      "type": "thinking",
-      "thinking": "让我思考一下这个问题...\n首先需要考虑...\n然后分析..."
-    },
-    {
-      "type": "text",
-      "text": "最终答案是 42。"
-    }
-  ],
-  "model": "claude-3-5-sonnet-20241022"
-}
-```
-
-**流式响应**：
-
-```
-event: content_block_start
-data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
-
-event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"让我思考..."}}
-
-event: content_block_stop
-data: {"type":"content_block_stop","index":0}
-
-event: content_block_start
-data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
-
-event: content_block_delta
-data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"最终答案"}}
-```
-
-#### 格式转换
-
-代理服务会自动在两种格式之间转换推理内容：
-
-- **OpenAI → Anthropic**：`reasoning_content` 字段转换为 `thinking` content block（索引 0）
-- **Anthropic → OpenAI**：`thinking` content block 转换为 `reasoning_content` 字段
-
-这样无论后端使用哪种格式，客户端都能收到正确格式的推理内容！
-
-### 健康检查
-
-**路径**：`GET /health`
-
-**响应**：
-
-```json
-{
-  "status": "ok",
-  "service": "interface_proxy",
-  "backend_url": "http://127.0.0.1:8000"
-}
-```
-
-## 使用示例
+## 💡 使用示例
 
 ### Python + OpenAI SDK
 
-#### 列出可用模型
-
 ```python
 from openai import OpenAI
 
 # 指向代理服务
 client = OpenAI(
     base_url="http://127.0.0.1:8080/v1",
-    api_key="dummy"  # 代理服务不需要 API key
+    api_key="dummy",  # 代理服务不需要真实 key
 )
 
-# 列出所有模型
-models = client.models.list()
-for model in models.data:
-    print(f"{model.id} - {model.owned_by}")
-
-# 获取特定模型信息
-model = client.models.retrieve("gpt-3.5-turbo")
-print(f"Model: {model.id}, Created: {model.created}")
-```
-
-#### Chat Completions（非流式）
-
-```python
-from openai import OpenAI
-
-# 指向代理服务
-client = OpenAI(
-    base_url="http://127.0.0.1:8080/v1",
-    api_key="dummy"  # 代理服务不需要 API key
-)
-
-# 非流式
+# 调用标准模型
 response = client.chat.completions.create(
     model="gpt-3.5-turbo",
     messages=[{"role": "user", "content": "Hello!"}]
 )
-print(response.choices[0].message.content)
-```
 
-#### Chat Completions（流式）
+# 调用 PTU 模型（自动识别和转换）
+response = client.chat.completions.create(
+    model="Doubao-1.5-pro-32k",  # PTU 模型
+    messages=[{"role": "user", "content": "你好"}]
+)
 
-```python
-# 流式
+# 流式调用
 stream = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[{"role": "user", "content": "Count to 10"}],
+    model="qwen3.5-plus",
+    messages=[{"role": "user", "content": "数到10"}],
     stream=True
 )
 for chunk in stream:
@@ -505,7 +134,7 @@ from anthropic import Anthropic
 # 指向代理服务
 client = Anthropic(
     base_url="http://127.0.0.1:8080",
-    api_key="dummy"  # 代理服务不需要 API key
+    api_key="dummy",
 )
 
 # 非流式
@@ -526,121 +155,300 @@ with client.messages.stream(
         print(text, end="")
 ```
 
-### 工具调用示例（Tool Use）
+### curl 命令行
 
-代理服务完整支持 Anthropic 的工具调用功能，兼容 Claude Code CLI。
+**OpenAI 格式 - 非流式请求**：
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dummy" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [
+      {"role": "user", "content": "Hello!"}
+    ],
+    "max_tokens": 100
+  }'
+```
+
+**OpenAI 格式 - PTU 模型请求**：
+
+```bash
+# 调用 Doubao 模型
+curl -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dummy" \
+  -d '{
+    "model": "Doubao-1.5-pro-32k",
+    "messages": [
+      {"role": "user", "content": "你好"}
+    ],
+    "max_tokens": 100
+  }'
+
+# 调用 Qwen 模型
+curl -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3.5-plus",
+    "messages": [
+      {"role": "user", "content": "介绍一下你自己"}
+    ],
+    "max_tokens": 200
+  }'
+
+# 调用 DeepSeek 模型
+curl -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "DeepSeek-V3",
+    "messages": [
+      {"role": "user", "content": "写一个冒泡排序"}
+    ],
+    "max_tokens": 500
+  }'
+```
+
+**OpenAI 格式 - 流式请求**：
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer dummy" \
+  -d '{
+    "model": "Doubao-1.5-pro-32k",
+    "messages": [
+      {"role": "user", "content": "数到10"}
+    ],
+    "stream": true,
+    "max_tokens": 100
+  }'
+```
+
+**Anthropic 格式 - 非流式请求**：
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dummy" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-3-5-sonnet-20241022",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "user", "content": "Hello!"}
+    ]
+  }'
+```
+
+**Anthropic 格式 - 流式请求**：
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: dummy" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-3-opus-20240229",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "user", "content": "Count to 10"}
+    ],
+    "stream": true
+  }'
+```
+
+**查询可用模型列表**：
+
+```bash
+# 列出所有可用模型
+curl http://127.0.0.1:8080/v1/models
+
+# 获取特定模型详情
+curl http://127.0.0.1:8080/v1/models/Doubao-1.5-pro-32k
+
+# 使用 jq 格式化输出
+curl -s http://127.0.0.1:8080/v1/models | jq '.data[] | {id, owned_by}'
+```
+
+## 🎯 工作原理
+
+### 架构概览
+
+```
+用户 (OpenAI SDK)  →  /v1/chat/completions  →  OpenAIAdapter   →  标准后端
+用户 (OpenAI SDK)  →  /v1/chat/completions  →  PTUAdapter      →  PTU Gateway
+用户 (Anthropic SDK) → /v1/messages         →  AnthropicAdapter → 标准后端
+```
+
+### 处理流程
+
+1. **接收请求** → FastAPI 路由识别格式
+2. **选择 Adapter** → 根据模型和格式选择
+3. **格式转换** → 外部格式 → 内部格式
+4. **后端调用** → Adapter 调用对应后端
+5. **响应转换** → 内部格式 → 外部格式
+6. **返回结果** → 用户收到期望格式的响应
+
+### 关键特性
+
+**自动识别 PTU 模型**：
 
 ```python
-from anthropic import Anthropic
+# config.yaml 中配置 PTU 模型列表
+ptu:
+  models:
+    - "Doubao-1.5-pro-32k"
+    - "qwen3.5-plus"
 
-# 指向代理服务
-client = Anthropic(
-    base_url="http://127.0.0.1:8080",
-    api_key="dummy"
-)
+# 代理自动识别并使用 PTUAdapter
+if config.is_ptu_model(request.model):
+    adapter = PTUAdapter(...)  # PTU Gateway
+else:
+    adapter = OpenAIAdapter(...)  # 标准后端
+```
 
-# 定义工具
-tools = [
-    {
-        "name": "get_weather",
-        "description": "获取指定城市的天气信息",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "location": {
-                    "type": "string",
-                    "description": "城市名称"
-                },
-                "unit": {
-                    "type": "string",
-                    "enum": ["celsius", "fahrenheit"],
-                    "description": "温度单位"
-                }
-            },
-            "required": ["location"]
-        }
+**PTU 格式处理**：
+
+```python
+# PTU 返回包装格式
+{
+  "code": 10000,
+  "msg": "成功",
+  "data": {
+    "response_content": {
+      # 内层是标准 OpenAI 格式
+      "choices": [...],
+      "usage": {...}
     }
-]
+  }
+}
 
-# 调用模型（带工具定义）
-response = client.messages.create(
-    model="claude-3-opus-20240229",
-    max_tokens=1024,
-    tools=tools,
-    messages=[{"role": "user", "content": "北京今天天气怎么样？"}]
-)
-
-# 处理工具调用
-for block in response.content:
-    if block.type == "tool_use":
-        print(f"工具: {block.name}")
-        print(f"参数: {block.input}")
-        # 执行工具并返回结果...
+# PTUAdapter 自动解包并返回标准格式
 ```
 
-更多示例请参考 `examples/tool_use_example.py`。
-
-## 架构说明
-
-### 适配器模式
-
-本项目采用**适配器模式**（Adapter Pattern）实现格式转换：
-
-```
-客户端请求 → 路由层 → 适配器（外部→内部） → 后端代理 → 模型服务
-                                                          ↓
-客户端响应 ← 适配器（内部→外部） ← 后端代理 ← 模型服务响应
-```
-
-**核心思想**：
-1. **统一内部格式**：定义统一的内部数据格式，避免 N×N 格式转换
-2. **适配器解耦**：每个格式适配器独立，互不影响
-3. **双向转换**：每个适配器实现请求和响应的双向转换
-
-### 项目结构
+## 📂 项目结构
 
 ```
 interface_proxy/
-├── proxy_server.py              # 服务启动入口
-├── requirements.txt             # Python 依赖
+├── proxy_server.py              # 🚀 服务启动入口
+├── requirements.txt             # 📦 Python 依赖
 ├── config/
-│   └── config.yaml              # 配置文件
+│   └── config.yaml              # ⚙️ 配置文件
 ├── proxy_app/                   # 核心代理模块
 │   ├── app.py                   # FastAPI 应用和路由
 │   ├── config.py                # 配置管理
 │   ├── models/                  # 数据模型定义
 │   │   ├── common.py            # 内部统一格式
-│   │   ├── openai_models.py     # OpenAI 格式模型
-│   │   └── anthropic_models.py  # Anthropic 格式模型
-│   ├── adapters/                # 格式适配器
+│   │   ├── openai_models.py     # OpenAI 格式
+│   │   └── anthropic_models.py  # Anthropic 格式
+│   ├── adapters/                # 🔌 格式适配器
 │   │   ├── base_adapter.py      # 适配器基类
-│   │   ├── openai_adapter.py    # OpenAI 格式适配
-│   │   └── anthropic_adapter.py # Anthropic 格式适配
-│   ├── proxy/                   # 代理核心逻辑
-│   │   └── backend_proxy.py     # 后端转发逻辑
+│   │   ├── openai_adapter.py    # OpenAI 适配器
+│   │   ├── anthropic_adapter.py # Anthropic 适配器
+│   │   └── ptu_adapter.py       # PTU 适配器
 │   └── utils/                   # 工具函数
-│       ├── http_client.py       # HTTP 客户端封装
+│       ├── http_client.py       # HTTP 客户端
 │       └── logger.py            # 日志配置
-├── tests/                       # 测试
-└── examples/                    # 使用示例
+├── tests/                       # 🧪 测试
+│   ├── README.md                # 测试指南
+│   ├── test_integration.py      # 集成测试（推荐）
+│   ├── test_adapter_units.py    # Adapter 单元测试
+│   ├── test_adapters.py         # 格式转换测试
+│   ├── test_ptu_adapter.py      # PTU 适配器测试
+│   └── test_api_key.sh          # API Key 验证脚本
+├── examples/                    # 📝 使用示例
+│   ├── openai_example.py        # OpenAI SDK 示例
+│   ├── anthropic_example.py     # Anthropic SDK 示例
+│   ├── ptu_example.py           # PTU 模型示例
+│   └── curl_examples.sh         # curl 命令行示例（推荐）
+└── docs/                        # 📚 文档
+    ├── ARCHITECTURE.md          # 架构文档（详细）
+    ├── DEVELOPMENT.md           # 开发文档
+    ├── PTU_INTEGRATION.md       # PTU 集成说明
+    └── PTU_IMPLEMENTATION_SUMMARY.md  # PTU 实施总结
 ```
 
-## 扩展指南
+## 🧪 测试
 
-### 如何添加新的格式适配器
+### 快速测试
 
-1. **定义数据模型**（`proxy_app/models/your_format_models.py`）：
-   ```python
-   from pydantic import BaseModel
+```bash
+# 1. 启动服务
+python proxy_server.py
 
-   class YourFormatRequest(BaseModel):
-       # 定义请求字段
-       pass
+# 2. 运行集成测试（推荐）
+python tests/test_integration.py
+```
 
-   class YourFormatResponse(BaseModel):
-       # 定义响应字段
-       pass
-   ```
+测试涵盖：
+- ✅ OpenAI 格式 → 标准后端
+- ✅ OpenAI 格式 → PTU 后端
+- ✅ Anthropic 格式 → OpenAI 后端
+- ✅ 流式和非流式响应
+- ✅ Models API
+
+详见 [测试指南](tests/README.md)。
+
+## 🔧 配置说明
+
+### Backend 配置
+
+```yaml
+backend:
+  url: "https://api.ppchat.vip"  # 后端 URL
+  api_key: "your-key"            # API Key
+  timeout: 600.0                 # 超时（秒）
+  max_connections: 100           # 最大连接数
+```
+
+### PTU 配置
+
+```yaml
+ptu:
+  backend_url: "http://api.schedule.mtc.sensetime.com"  # PTU Gateway
+  models:                        # PTU 模型列表
+    - "Doubao-1.5-pro-32k"
+    - "Doubao-1.5-thinking-pro"
+    - "DeepSeek-R1"
+    - "DeepSeek-V3"
+    - "qwen3.5-plus"
+    - "qwen3.5-flash"
+    # ... 更多模型
+```
+
+### Routes 配置
+
+```yaml
+routes:
+  openai_enabled: true           # 启用 OpenAI 接口
+  anthropic_enabled: true        # 启用 Anthropic 接口
+```
+
+## 🔌 API 端点
+
+| 端点 | 格式 | 说明 |
+|------|------|------|
+| `GET /` | - | 服务信息 |
+| `GET /health` | - | 健康检查 |
+| `GET /v1/models` | OpenAI | 列出所有模型 |
+| `GET /v1/models/{id}` | OpenAI | 获取模型详情 |
+| `POST /v1/chat/completions` | OpenAI | Chat Completions |
+| `POST /v1/messages` | Anthropic | Messages API |
+
+## 📖 文档
+
+- **[架构文档](docs/ARCHITECTURE.md)** - 详细架构设计和工作原理
+- **[开发文档](docs/DEVELOPMENT.md)** - 实现细节和开发指南
+- **[PTU 集成](docs/PTU_INTEGRATION.md)** - PTU 后端集成说明
+- **[测试指南](tests/README.md)** - 完整的测试文档
+
+## 🛠️ 扩展指南
+
+### 添加新格式适配器
+
+1. **定义数据模型**（`proxy_app/models/your_format_models.py`）
 
 2. **实现适配器**（`proxy_app/adapters/your_format_adapter.py`）：
    ```python
@@ -655,117 +463,73 @@ interface_proxy/
            # 内部格式 → 外部格式
            pass
 
-       async def adapt_streaming_response(self, internal_stream):
-           # 流式响应转换
+       async def forward(self, internal_request):
+           # 调用后端服务
            pass
    ```
 
-3. **添加路由**（在 `proxy_app/app.py` 的 `register_routes()` 中）：
+3. **添加路由**（在 `proxy_app/app.py` 中）：
    ```python
    @app.post("/your/path")
-   async def your_format_endpoint(request: YourFormatRequest):
-       adapter = YourFormatAdapter()
+   async def your_endpoint(request: YourFormatRequest):
+       adapter = YourFormatAdapter(...)
        return await handle_request(request, adapter)
    ```
 
-4. **更新配置**（`config/config.yaml`）：
-   ```yaml
-   routes:
-     your_format_enabled: true
-   ```
+4. **更新配置**（`config/config.yaml`）
 
-## 配置说明
+## 🎨 设计模式
 
-### config.yaml 参数详解
+本项目采用 **适配器模式**（Adapter Pattern）：
 
-```yaml
-backend:
-  url: "http://127.0.0.1:8000"
-    # 后端模型服务地址
-    # 示例：http://127.0.0.1:8000, http://your-server:8000
+**核心思想**：
+- 定义统一的内部格式
+- 每个适配器负责格式转换和后端调用
+- 适配器之间完全解耦
 
-  timeout: 600.0
-    # 请求超时时间（秒）
-    # 推荐：流式请求设置较大值（600-1200秒）
+**优势**：
+- 📦 模块化：每个格式适配器独立
+- 🔧 可扩展：添加新格式只需新增适配器
+- 🧹 清晰：职责分离，易于维护
+- 🚀 高效：异步架构，高性能
 
-  max_connections: 100
-    # HTTP 连接池最大连接数
-    # 根据并发量调整，一般 50-200
+详见 [架构文档](docs/ARCHITECTURE.md)。
 
-  max_keepalive_connections: 20
-    # HTTP 连接池最大保活连接数
-    # 一般设置为 max_connections 的 10-20%
-
-server:
-  host: "0.0.0.0"
-    # 监听地址
-    # "0.0.0.0" - 监听所有网卡
-    # "127.0.0.1" - 只监听本地
-
-  port: 8080
-    # 监听端口
-
-  log_level: "INFO"
-    # 日志级别：DEBUG, INFO, WARNING, ERROR, CRITICAL
-
-routes:
-  openai_enabled: true
-    # 是否启用 OpenAI 格式接口 /v1/chat/completions
-
-  anthropic_enabled: true
-    # 是否启用 Anthropic 格式接口 /v1/messages
-```
-
-## 性能优化
-
-- **异步架构**：基于 FastAPI + httpx 的异步 I/O
-- **连接池**：复用 HTTP 连接，减少建立连接开销
-- **流式传输**：支持流式响应，降低首字节延迟
-- **内存优化**：流式传输避免大量数据在内存中累积
-
-## 常见问题
-
-### Q: 后端服务不是 OpenAI 格式怎么办？
-
-A: 修改 `proxy_app/proxy/backend_proxy.py` 中的 `_convert_to_backend_format()` 和 `_parse_backend_response()` 方法，适配您的后端格式。
-
-### Q: 如何支持多模态（图片）？
-
-A: Anthropic 适配器已支持多模态 content 格式解析，但需要确保后端服务支持图片输入。
-
-### Q: 性能瓶颈在哪里？
-
-A: 代理层本身开销很小（<5ms），主要延迟来自后端模型推理。可以通过增加 `max_connections` 提高并发能力。
-
-### Q: 如何添加认证？
-
-A: 在 `proxy_app/app.py` 中添加 FastAPI 的 `Depends` 中间件实现 API Key 验证。
-
-## 开发计划
-
-- [ ] 添加单元测试和集成测试
-- [ ] 支持更多格式（Google PaLM, Hugging Face TGI 等）
-- [ ] 添加多后端负载均衡
-- [ ] 添加缓存层（Redis）
-- [ ] 添加监控和指标（Prometheus）
-- [ ] WebUI 管理界面
-
-## 文档
-
-- **[README.md](README.md)** - 项目主文档（本文件）
-- **[plan.md](plan.md)** - 开发思路和计划
-- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - 开发文档（实现细节、API 使用指南、技术细节）
-- **[docs/REASONING_CONTENT_SUPPORT.md](docs/REASONING_CONTENT_SUPPORT.md)** - 推理内容支持说明
-- **[examples/](examples/)** - 使用示例代码
-
-## 许可证
-
-MIT License
-
-## 贡献
+## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！
 
-## 作者
+添加新功能时，请：
+1. 编写相应的测试
+2. 更新相关文档
+3. 遵循现有代码风格
+
+## 📝 开发计划
+
+- [x] ~~OpenAI 和 Anthropic 格式互转~~ ✅
+- [x] ~~PTU 后端支持（30+ 模型）~~ ✅
+- [x] ~~工具调用支持~~ ✅
+- [x] ~~推理内容支持~~ ✅
+- [x] ~~新架构：Adapter 负责后端调用~~ ✅
+- [ ] 支持更多格式（Google PaLM, Hugging Face TGI 等）
+- [ ] 多后端负载均衡
+- [ ] 缓存层（Redis）
+- [ ] 监控和指标（Prometheus）
+- [ ] WebUI 管理界面
+
+## 📄 许可证
+
+MIT License
+
+## 👨‍💻 作者
 
 Interface Proxy Service
+
+---
+
+**相关链接**：
+- 📖 [架构文档](docs/ARCHITECTURE.md)
+- 🧪 [测试指南](tests/README.md)
+- 💡 [使用示例](examples/)
+
+最后更新：2026-03-02

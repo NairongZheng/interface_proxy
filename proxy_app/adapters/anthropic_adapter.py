@@ -8,7 +8,7 @@ import time
 import uuid
 from typing import AsyncGenerator, List, Dict, Any
 
-from proxy_app.adapters.base_adapter import BaseAdapter
+from proxy_app.adapters.openai_adapter import OpenAIAdapter
 from proxy_app.models.anthropic_models import (
     AnthropicMessage,
     AnthropicMessagesRequest,
@@ -26,9 +26,9 @@ from proxy_app.models.common import (
 )
 
 
-class AnthropicAdapter(BaseAdapter):
+class AnthropicAdapter(OpenAIAdapter):
     """
-    Anthropic 格式适配器
+    Anthropic 格式适配器，继承自 OpenAIAdapter
 
     Anthropic Messages API 与 OpenAI 格式的主要差异：
     1. system 字段独立于 messages
@@ -37,6 +37,11 @@ class AnthropicAdapter(BaseAdapter):
     4. content 是数组格式 [{"type": "text", "text": "..."}]
     5. stop_reason 而非 finish_reason
     6. 流式响应有多种事件类型（message_start, content_block_delta 等）
+
+    后端调用策略：
+    - 将 Anthropic 请求转换为内部格式（类似 OpenAI）
+    - 复用 OpenAIAdapter 的 forward/forward_stream 方法调用标准 OpenAI 后端
+    - 将响应转换回 Anthropic 格式
     """
 
     def adapt_request(self, request_data: AnthropicMessagesRequest) -> InternalRequest:

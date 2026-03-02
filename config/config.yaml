@@ -1,7 +1,16 @@
 # 后端服务配置
 backend:
+  # 后端类型：standard(标准OpenAI), ptu(PTU Gateway), both(两者都启用)
+  # - standard: 只使用标准 OpenAI 后端，忽略 PTU 配置
+  # - ptu: 只使用 PTU 后端，所有请求都通过 PTU Gateway
+  # - both: 根据模型名称自动选择（PTU 模型用 PTU，其他用标准后端）
+  type: "both"
+
   # 后端模型服务地址（例如：http://127.0.0.1:8000）
-  url: "http://127.0.0.1:8000"
+  url: "https://api.ppchat.vip"
+
+  # API Key（用于后端认证）
+  api_key: "REMOVED_API_KEY"
 
   # 请求超时时间（秒）
   timeout: 600.0
@@ -58,3 +67,125 @@ models:
     - id: "o1-mini"
       owned_by: "openai"
       created: 1725494400
+    # PTU 模型列表
+    # Doubao 系列
+    - id: "Doubao-1.5-pro-32k"
+      owned_by: "bytedance"
+      created: 1700000000
+    - id: "Doubao-1.5-pro-32k-character-250228"
+      owned_by: "bytedance"
+      created: 1700000000
+    - id: "Doubao-1.5-vision-pro"
+      owned_by: "bytedance"
+      created: 1700000000
+    - id: "Doubao-1.5-thinking-pro"
+      owned_by: "bytedance"
+      created: 1700000000
+    - id: "doubao-1.5-thinking-vision-pro-250428"
+      owned_by: "bytedance"
+      created: 1700000000
+    - id: "doubao-1-5-thinking-pro-m-250428"
+      owned_by: "bytedance"
+      created: 1700000000
+    - id: "doubao-seed-1.6-250615"
+      owned_by: "bytedance"
+      created: 1700000000
+    - id: "doubao-seed-1.6-thinking-250615"
+      owned_by: "bytedance"
+      created: 1700000000
+    - id: "doubao-seed-1.6-flash-250615"
+      owned_by: "bytedance"
+      created: 1700000000
+    - id: "doubao-seed-2.0-260215"
+      owned_by: "bytedance"
+      created: 1700000000
+    # DeepSeek 系列
+    - id: "DeepSeek-R1"
+      owned_by: "deepseek"
+      created: 1700000000
+    - id: "DeepSeek-R1-250528"
+      owned_by: "deepseek"
+      created: 1700000000
+    - id: "DeepSeek-V3"
+      owned_by: "deepseek"
+      created: 1700000000
+    - id: "deepseek-v3.1-250821"
+      owned_by: "deepseek"
+      created: 1700000000
+    - id: "deepseek-v3.2-251201"
+      owned_by: "deepseek"
+      created: 1700000000
+    # Qwen 系列
+    - id: "qwen3-235b-a22b-thinking-2507"
+      owned_by: "alibaba"
+      created: 1700000000
+    - id: "qwen3-vl-30b-a3b-thinking"
+      owned_by: "alibaba"
+      created: 1700000000
+    - id: "qwen3-vl-30b-a3b-instruct"
+      owned_by: "alibaba"
+      created: 1700000000
+    - id: "qwen3-vl-235b-a22b-thinking"
+      owned_by: "alibaba"
+      created: 1700000000
+    - id: "qwen3-vl-235b-a22b-instruct"
+      owned_by: "alibaba"
+      created: 1700000000
+    - id: "qwen3.5-35b-a3b"
+      owned_by: "alibaba"
+      created: 1700000000
+    - id: "qwen3.5-397b-a17b"
+      owned_by: "alibaba"
+      created: 1700000000
+    - id: "qwen3.5-plus"
+      owned_by: "alibaba"
+      created: 1700000000
+    - id: "qwen3.5-flash"
+      owned_by: "alibaba"
+      created: 1700000000
+    # GPT-5 系列（PTU 后端）
+    - id: "gpt-5-nano-2025-08-07"
+      owned_by: "openai"
+      created: 1700000000
+    - id: "gpt-5-mini-2025-08-07"
+      owned_by: "openai"
+      created: 1700000000
+    - id: "gpt-5-2025-08-07"
+      owned_by: "openai"
+      created: 1700000000
+
+# PTU 后端配置
+ptu:
+  # PTU 后端 URL（PTU Gateway 地址）
+  backend_url: "http://api.schedule.mtc.sensetime.com"
+
+  # PTU 模型列表（用于路由层判断模型是否属于 PTU 后端）
+  models:
+    - "Doubao-1.5-pro-32k"
+    - "Doubao-1.5-pro-32k-character-250228"
+    - "Doubao-1.5-vision-pro"
+    - "Doubao-1.5-thinking-pro"
+    - "doubao-1.5-thinking-vision-pro-250428"
+    - "doubao-1-5-thinking-pro-m-250428"
+    - "DeepSeek-R1"
+    - "Doubao-1.5-pro-32k"
+    - "DeepSeek-R1-250528"
+    - "DeepSeek-V3"
+    - "doubao-seed-1.6-250615"
+    - "doubao-seed-1.6-thinking-250615"
+    - "doubao-seed-1.6-flash-250615"
+    - "gpt-5-nano-2025-08-07"
+    - "gpt-5-mini-2025-08-07"
+    - "gpt-5-2025-08-07"
+    - "deepseek-v3.1-250821"
+    - "deepseek-v3.2-251201"
+    - "doubao-seed-2.0-260215"
+    - "qwen3-235b-a22b-thinking-2507"
+    - "qwen3-vl-30b-a3b-thinking"
+    - "qwen3-vl-30b-a3b-instruct"
+    - "qwen3-vl-235b-a22b-thinking"
+    - "qwen3-vl-235b-a22b-instruct"
+    - "qwen3.5-35b-a3b"
+    - "qwen3.5-397b-a17b"
+    - "qwen3.5-plus"
+    - "qwen3.5-flash"

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from proxy_app.adapters.base_adapter import BaseAdapter
 from proxy_app.adapters.anthropic_adapter import AnthropicAdapter
 from proxy_app.adapters.openai_adapter import OpenAIAdapter
+from proxy_app.adapters.ptu_adapter import PTUAdapter
 from proxy_app.config import Config
 from proxy_app.models.anthropic_models import AnthropicMessagesRequest
 from proxy_app.models.openai_models import (
@@ -19,12 +20,7 @@ from proxy_app.models.openai_models import (
     ModelList,
     ModelPermission,
 )
-from proxy_app.proxy.backend_proxy import BackendProxy
 from proxy_app.utils.logger import logger, setup_logger
-
-
-# 全局变量：后端代理实例（在 startup 事件中初始化）
-backend_proxy: BackendProxy = None
 
 
 def create_app(config: Config = None) -> FastAPI:
@@ -58,37 +54,17 @@ def create_app(config: Config = None) -> FastAPI:
     @app.on_event("startup")
     async def startup_event():
         """
-        应用启动时初始化后端代理
+        应用启动事件
 
-        初始化全局的 BackendProxy 实例，用于后续请求转发
+        新架构中，Adapter 自己管理 HTTP 客户端，无需全局初始化
         """
-        global backend_proxy
-
-        logger.info("正在初始化后端代理...")
-
-        backend_proxy = BackendProxy(
-            backend_url=config.backend_url,
-            timeout=config.backend_timeout,
-            max_connections=config.backend_max_connections,
-            max_keepalive_connections=config.backend_max_keepalive_connections,
-        )
-
         logger.info("应用启动完成")
 
     @app.on_event("shutdown")
     async def shutdown_event():
         """
         应用关闭时清理资源
-
-        关闭后端代理的 HTTP 连接
         """
-        global backend_proxy
-
-        logger.info("正在关闭应用...")
-
-        if backend_proxy:
-            await backend_proxy.close()
-
         logger.info("应用已关闭")
 
     # 注册路由
@@ -120,8 +96,15 @@ def register_routes(app: FastAPI, config: Config):
         """
         return {
             "service": "Interface Proxy Service",
-            "version": "1.0.0",
-            "description": "LLM 接口代理服务，支持 OpenAI 和 Anthropic 格式互转",
+            "version": "1.1.0",
+            "description": "LLM 接口代理服务，支持多格式转换和 PTU 后端",
+            "features": [
+                "OpenAI 格式接口 (/v1/chat/completions)",
+                "Anthropic 格式接口 (/v1/messages)",
+                "PTU 后端自动识别和处理",
+                "多模型支持 (30+ PTU 模型)",
+                "流式和非流式响应",
+            ],
             "endpoints": {
                 "health": "/health",
                 "openai_chat": "/v1/chat/completions" if config.openai_enabled else None,
@@ -129,7 +112,11 @@ def register_routes(app: FastAPI, config: Config):
                 "models_list": "/v1/models",
                 "model_detail": "/v1/models/{model_id}",
             },
-            "backend_url": config.backend_url,
+            "backend": {
+                "url": config.backend_url,
+                "ptu_enabled": len(config.ptu_models) > 0,
+                "ptu_models_count": len(config.ptu_models),
+            },
         }
 
     # ==================== 健康检查路由 ====================
@@ -156,7 +143,12 @@ def register_routes(app: FastAPI, config: Config):
         列出所有可用模型
 
         实现 OpenAI Models API 的 list 接口
-        返回配置文件中定义的所有可用模型
+        根据配置文件返回当前后端支持的所有模型
+
+        模型来源：
+        - 从 config.yaml 的 models.available_models 读取
+        - 包含标准模型和 PTU 模型
+        - 可通过修改配置文件来调整暴露的模型列表
 
         Returns:
             ModelList: 包含所有模型信息的列表
@@ -179,8 +171,8 @@ def register_routes(app: FastAPI, config: Config):
         """
         logger.info("收到模型列表请求")
 
-        # 从配置中获取模型列表
-        available_models = config.available_models
+        # 从配置中获取模型列表（根据后端类型过滤）
+        available_models = config.get_available_models_by_backend()
 
         # 构建 Model 对象列表
         models = []
@@ -205,7 +197,14 @@ def register_routes(app: FastAPI, config: Config):
         # 构建响应
         model_list = ModelList(data=models)
 
-        logger.info(f"返回 {len(models)} 个可用模型")
+        # 统计 PTU 模型数量
+        ptu_model_ids = set(config.ptu_models)
+        ptu_count = sum(1 for m in available_models if m["id"] in ptu_model_ids)
+
+        logger.info(
+            f"返回 {len(models)} 个可用模型 "
+            f"(后端类型: {config.backend_type}, PTU模型: {ptu_count}, 其他模型: {len(models) - ptu_count})"
+        )
 
         return JSONResponse(content=model_list.model_dump())
 
@@ -238,8 +237,8 @@ def register_routes(app: FastAPI, config: Config):
         """
         logger.info(f"收到模型详情请求: model_id={model_id}")
 
-        # 从配置中查找模型
-        available_models = config.available_models
+        # 从配置中查找模型（根据后端类型过滤）
+        available_models = config.get_available_models_by_backend()
         model_config = None
 
         for m in available_models:
@@ -283,7 +282,11 @@ def register_routes(app: FastAPI, config: Config):
             """
             OpenAI Chat Completions API 兼容接口
 
-            接收 OpenAI 格式的请求，转发到后端服务，返回 OpenAI 格式的响应。
+            自动识别模型类型并选择合适的适配器：
+            - PTU 模型：使用 PTUAdapter（处理 PTU 包装格式）
+            - 标准模型：使用 OpenAIAdapter（标准 OpenAI 格式）
+
+            对用户完全透明，统一使用 OpenAI 接口调用。
 
             支持流式和非流式两种模式。
 
@@ -299,11 +302,26 @@ def register_routes(app: FastAPI, config: Config):
             """
             logger.info(f"收到 OpenAI 格式请求: model={request.model}, stream={request.stream}")
 
-            # 创建 OpenAI 适配器
-            adapter = OpenAIAdapter()
+            # 根据模型选择适配器
+            if config.is_ptu_model(request.model):
+                logger.info(f"模型 {request.model} 为 PTU 模型，使用 PTUAdapter")
+                # PTU 使用特定的 backend_url
+                backend_url = config.ptu_backend_url or config.backend_url
+                adapter = PTUAdapter(
+                    backend_url=backend_url,
+                    api_key=config.backend_api_key,
+                    timeout=config.backend_timeout,
+                )
+            else:
+                logger.info(f"模型 {request.model} 为标准模型，使用 OpenAIAdapter")
+                adapter = OpenAIAdapter(
+                    backend_url=config.backend_url,
+                    api_key=config.backend_api_key,
+                    timeout=config.backend_timeout,
+                )
 
             # 使用通用处理函数处理请求
-            return await handle_request(request, adapter)
+            return await handle_request(request, adapter, config)
 
         logger.info("OpenAI 格式路由已启用: /v1/chat/completions")
 
@@ -342,27 +360,33 @@ def register_routes(app: FastAPI, config: Config):
             )
 
             # 创建 Anthropic 适配器
-            adapter = AnthropicAdapter()
+            # Anthropic 目前转换为 OpenAI 格式后调用后端
+            adapter = AnthropicAdapter(
+                backend_url=config.backend_url,
+                api_key=config.backend_api_key,
+                timeout=config.backend_timeout,
+            )
 
             # 使用通用处理函数处理请求
-            return await handle_request(request, adapter)
+            return await handle_request(request, adapter, config)
 
         logger.info("Anthropic 格式路由已启用: /v1/messages")
 
     # ==================== 通用请求处理 ====================
 
-    async def handle_request(request: Any, adapter: BaseAdapter):
+    async def handle_request(request: Any, adapter: BaseAdapter, config: Config):
         """
         通用请求处理函数
 
-        实现适配器模式的核心逻辑：
+        新架构实现：
         1. 请求适配：外部格式 → 内部格式
-        2. 后端转发：内部格式 → 后端服务
+        2. 后端调用：Adapter 直接调用后端（forward/forward_stream）
         3. 响应适配：内部格式 → 外部格式
 
         Args:
             request: 外部格式的请求对象（Pydantic 模型）
-            adapter: 适配器实例
+            adapter: 适配器实例（已初始化 backend_url 和 api_key）
+            config: 配置对象
 
         Returns:
             非流式：JSONResponse
@@ -375,18 +399,18 @@ def register_routes(app: FastAPI, config: Config):
             # 步骤 1: 请求适配（外部格式 → 内部格式）
             internal_request = adapter.adapt_request(request)
 
-            logger.debug(f"请求已适配为内部格式: {internal_request}")
+            logger.debug(f"请求已适配为内部格式: model={internal_request['model']}, stream={internal_request['stream']}")
 
-            # 步骤 2: 后端转发（内部格式 → 后端服务）
-            backend_response = await backend_proxy.forward(internal_request)
-
-            # 步骤 3: 响应适配（内部格式 → 外部格式）
+            # 步骤 2: 后端调用（Adapter 自己负责调用后端）
             if internal_request["stream"]:
-                # 流式响应：返回 StreamingResponse
+                # 流式响应
+                internal_stream = adapter.forward_stream(internal_request)
+                external_stream = adapter.adapt_streaming_response(internal_stream)
+
                 logger.info("返回流式响应")
 
                 return StreamingResponse(
-                    adapter.adapt_streaming_response(backend_response),
+                    external_stream,
                     media_type="text/event-stream",
                     headers={
                         "Cache-Control": "no-cache",
@@ -394,8 +418,11 @@ def register_routes(app: FastAPI, config: Config):
                     },
                 )
             else:
-                # 非流式响应：返回 JSONResponse
-                external_response = adapter.adapt_response(backend_response)
+                # 非流式响应
+                internal_response = await adapter.forward(internal_request)
+
+                # 步骤 3: 响应适配（内部格式 → 外部格式）
+                external_response = adapter.adapt_response(internal_response)
 
                 logger.info("返回非流式响应")
 

@@ -4,7 +4,8 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, Optional
+import httpx
 
 from proxy_app.models.common import InternalRequest, InternalResponse, InternalStreamChunk
 
@@ -13,16 +14,43 @@ class BaseAdapter(ABC):
     """
     适配器抽象基类
 
-    所有格式适配器都需要继承此类并实现三个核心方法：
+    所有格式适配器都需要继承此类并实现核心方法：
     1. adapt_request: 外部格式 → 内部格式
     2. adapt_response: 内部格式 → 外部格式（非流式）
     3. adapt_streaming_response: 内部格式 → 外部格式（流式）
+    4. forward: 调用后端服务（每个后端的调用方式可能不同）
 
     适配器模式的核心思想：
     - 定义统一的内部格式，避免 N×N 格式转换
-    - 每个外部格式只需实现到内部格式的双向转换
+    - 每个适配器知道如何调用自己的后端服务
     - 适配器之间完全解耦，互不影响
     """
+
+    def __init__(self, backend_url: str = None, api_key: str = None, timeout: float = 600.0):
+        """
+        初始化适配器
+
+        Args:
+            backend_url: 后端服务 URL
+            api_key: API Key（如果需要）
+            timeout: 请求超时时间（秒）
+        """
+        self.backend_url = backend_url
+        self.api_key = api_key
+        self.timeout = timeout
+        self._client: Optional[httpx.AsyncClient] = None
+
+    async def get_client(self) -> httpx.AsyncClient:
+        """获取或创建 HTTP 客户端"""
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+        return self._client
+
+    async def close(self):
+        """关闭 HTTP 客户端"""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     @abstractmethod
     def adapt_request(self, request_data: Any) -> InternalRequest:
@@ -156,3 +184,42 @@ class BaseAdapter(ABC):
             格式名称（例如：'openai', 'anthropic'）
         """
         return self.__class__.__name__.replace("Adapter", "").lower()
+
+    @abstractmethod
+    async def forward(self, internal_request: InternalRequest) -> InternalResponse:
+        """
+        转发请求到后端服务（非流式）
+
+        每个适配器知道如何调用自己的后端：
+        - OpenAIAdapter: 调用标准 OpenAI API
+        - PTUAdapter: 调用 PTU Gateway API
+        - AnthropicAdapter: 可以转换后调用 OpenAI 后端，或直接调用 Anthropic 后端
+
+        Args:
+            internal_request: 内部统一格式的请求
+
+        Returns:
+            内部统一格式的响应
+
+        Raises:
+            Exception: 后端调用失败
+        """
+        pass
+
+    @abstractmethod
+    async def forward_stream(
+        self, internal_request: InternalRequest
+    ) -> AsyncGenerator[InternalStreamChunk, None]:
+        """
+        转发请求到后端服务（流式）
+
+        Args:
+            internal_request: 内部统一格式的请求
+
+        Yields:
+            内部统一格式的流式响应块
+
+        Raises:
+            Exception: 后端调用失败
+        """
+        pass
