@@ -11,6 +11,7 @@ tests/
 ├── test_adapter_units.py       # 单元测试：Adapter 层
 ├── test_adapters.py            # 单元测试：格式转换
 ├── test_ptu_adapter.py         # 单元测试：PTU Adapter
+├── stress_test.py              # 🚀 压力测试（性能测试）
 └── test_api_key.sh             # 快速验证 API Key
 ```
 
@@ -87,6 +88,72 @@ pytest tests/test_adapters.py -v
 - ✅ PTU 响应解包
 - ✅ Channel code 推断
 - ✅ 错误处理
+
+### 压力测试（stress_test.py）
+- ✅ 并发性能测试
+- ✅ 流式/非流式响应性能
+- ✅ 吞吐量和延迟统计
+- ✅ 多模型性能对比
+
+## 🚀 压力测试
+
+压力测试用于评估 proxy 服务的性能和并发能力。
+
+### 快速开始
+
+```bash
+# 基础压测：10 并发，100 请求
+python tests/stress_test.py
+
+# 自定义参数
+python tests/stress_test.py --concurrency 20 --requests 200 --model qwen3.5-35b-a3b
+
+# 测试流式响应
+python tests/stress_test.py --stream --concurrency 10 --requests 100
+
+# 持续压测 60 秒
+python tests/stress_test.py --duration 60 --concurrency 10
+```
+
+### 常用测试场景
+
+```bash
+# 1. 低并发稳定性测试（推荐开始）
+python tests/stress_test.py -c 3 -n 15 -m qwen3.5-35b-a3b
+
+# 2. 中等并发测试
+python tests/stress_test.py -c 10 -n 100 -m qwen3.5-35b-a3b
+
+# 3. 高并发压力测试
+python tests/stress_test.py -c 50 -n 500 -m qwen3.5-35b-a3b
+
+# 4. 流式响应性能测试
+python tests/stress_test.py -c 5 -n 50 -m qwen3.5-35b-a3b --stream
+
+# 5. 持续稳定性测试
+python tests/stress_test.py -c 10 -d 60 -m qwen3.5-35b-a3b
+```
+
+### 性能指标
+
+压测报告包含以下关键指标：
+
+- **成功率** - 请求成功的百分比（目标 > 95%）
+- **吞吐量（QPS）** - 每秒处理的请求数
+- **响应时间** - 平均、P50、P90、P95、P99
+- **首 Token 时间** - 流式响应的 TTFT（Time To First Token）
+- **错误详情** - 失败请求的错误分类
+
+### 详细文档
+
+完整的压测指南请查看：[压力测试指南](../docs/STRESS_TEST_GUIDE.md)
+
+包含：
+- 详细的命令行参数说明
+- 多种测试场景示例
+- 性能指标解读
+- 常见问题排查
+- 性能优化建议
 
 ## 🔧 测试配置
 
@@ -229,6 +296,7 @@ jobs:
 - [项目 README](../README.md) - 项目主文档
 - [开发文档](../docs/DEVELOPMENT.md) - 实现细节
 - [架构文档](../docs/ARCHITECTURE.md) - 新架构说明
+- [压力测试指南](../docs/STRESS_TEST_GUIDE.md) - 性能测试详细文档
 
 ## 📝 贡献测试
 

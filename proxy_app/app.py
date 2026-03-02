@@ -110,6 +110,7 @@ def register_routes(app: FastAPI, config: Config):
                 "openai_chat": "/v1/chat/completions" if config.openai_enabled else None,
                 "anthropic_messages": "/v1/messages" if config.anthropic_enabled else None,
                 "models_list": "/v1/models",
+                "model_names_simple": "/v1/model-names",
                 "model_detail": "/v1/models/{model_id}",
             },
             "backend": {
@@ -207,6 +208,40 @@ def register_routes(app: FastAPI, config: Config):
         )
 
         return JSONResponse(content=model_list.model_dump())
+
+    @app.get("/v1/model-names")
+    async def list_model_names():
+        """
+        列出所有可用模型的名称（简化版）
+
+        只返回模型 ID 列表，不包含详细信息
+        适用于需要快速获取模型列表的场景
+
+        Returns:
+            dict: 包含模型名称列表的字典
+
+        Example:
+            GET /v1/model-names
+            Response:
+            {
+                "models": ["gpt-3.5-turbo", "gpt-4", "Doubao-1.5-pro-32k", ...],
+                "count": 42
+            }
+        """
+        logger.info("收到简化模型列表请求")
+
+        # 从配置中获取模型列表（根据后端类型过滤）
+        available_models = config.get_available_models_by_backend()
+
+        # 只提取模型 ID
+        model_names = [model_config["id"] for model_config in available_models]
+
+        logger.info(f"返回 {len(model_names)} 个模型名称")
+
+        return JSONResponse(content={
+            "models": model_names,
+            "count": len(model_names)
+        })
 
     @app.get("/v1/models/{model_id}")
     async def get_model(model_id: str):

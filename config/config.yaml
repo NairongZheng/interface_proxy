@@ -4,7 +4,7 @@ backend:
   # - standard: 只使用标准 OpenAI 后端，忽略 PTU 配置
   # - ptu: 只使用 PTU 后端，所有请求都通过 PTU Gateway
   # - both: 根据模型名称自动选择（PTU 模型用 PTU，其他用标准后端）
-  type: "both"
+  type: "ptu"
 
   # 后端模型服务地址（例如：http://127.0.0.1:8000）
   url: "https://api.ppchat.vip"

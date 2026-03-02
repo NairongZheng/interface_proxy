@@ -88,6 +88,7 @@ curl http://127.0.0.1:8080/
 
 ```bash
 curl http://127.0.0.1:8080/v1/models
+curl http://127.0.0.1:8080/v1/model-names
 ```
 
 ## 💡 使用示例
