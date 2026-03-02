@@ -87,6 +87,8 @@ class ChatCompletionRequest(BaseModel):
         logit_bias: logit 偏置
         user: 用户标识符
         reasoning_effort: 推理努力程度（用于 o1 系列模型）
+        tools: 可用的工具列表（用于函数调用）
+        tool_choice: 工具选择策略（auto, none, 或指定工具）
     """
     model: str
     messages: List[ChatMessage]
@@ -101,6 +103,9 @@ class ChatCompletionRequest(BaseModel):
     logit_bias: Optional[Dict[str, float]] = None
     user: Optional[str] = None
     reasoning_effort: Optional[Literal["low", "medium", "high"]] = None
+    # 工具调用相关参数
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
 
     class Config:
         # 允许额外字段（用于扩展）

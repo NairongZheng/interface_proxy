@@ -104,6 +104,16 @@ class OpenAIAdapter(BaseAdapter):
             "user": request_data.user,
         }
 
+        # 处理工具调用参数
+        if request_data.tools:
+            # 转换 tools 为字典列表（如果是 Pydantic 模型则转换）
+            internal_request["tools"] = [
+                tool.model_dump() if hasattr(tool, "model_dump") else tool
+                for tool in request_data.tools
+            ]
+        if request_data.tool_choice:
+            internal_request["tool_choice"] = request_data.tool_choice
+
         return internal_request
 
     def adapt_response(self, internal_response: InternalResponse) -> ChatCompletionResponse:
@@ -425,6 +435,11 @@ class OpenAIAdapter(BaseAdapter):
             openai_request["n"] = internal_request["n"]
         if "user" in internal_request and internal_request["user"]:
             openai_request["user"] = internal_request["user"]
+        # 工具调用参数
+        if "tools" in internal_request and internal_request["tools"]:
+            openai_request["tools"] = internal_request["tools"]
+        if "tool_choice" in internal_request:
+            openai_request["tool_choice"] = internal_request["tool_choice"]
 
         return openai_request
 
