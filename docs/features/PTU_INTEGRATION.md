@@ -375,7 +375,7 @@ BackendProxy 会自动添加 PTU 特有参数：
   "model": "Doubao-1.5-pro-32k",
   "messages": [...],
   "channel_code": "doubao",
-  "transaction_id": "proxy-Doubao-1.5-pro-32k-1234567890",
+  "transaction_id": "proxy-Doubao-1.5-pro-32k",
   ...  // 其他 OpenAI 参数
 }
 ```

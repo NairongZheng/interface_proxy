@@ -181,7 +181,7 @@ class PTUAdapter(OpenAIAdapter):
           "server_name": "test",
           "model": "Doubao-1.5-pro-32k",
           "messages": [...],
-          "transaction_id": "user-model-timestamp",
+          "transaction_id": "user-model",
           "channel_code": "doubao|ali|azure",
           "stream": true|false,
           "tools": [...],  // 可选
@@ -207,7 +207,7 @@ class PTUAdapter(OpenAIAdapter):
             "server_name": "test",
             "model": model,
             "messages": internal_request["messages"],
-            "transaction_id": f"{getpass.getuser()}-{model}-{int(time.time())}",
+            "transaction_id": f"{getpass.getuser()}-{model}",
             "channel_code": self.infer_channel_code(model),
         }
 

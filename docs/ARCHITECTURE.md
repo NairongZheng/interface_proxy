@@ -129,7 +129,7 @@ def _build_ptu_request(self, internal_request):
         "server_name": "test",
         "model": internal_request["model"],
         "messages": internal_request["messages"],
-        "transaction_id": f"{user}-{model}-{timestamp}",
+        "transaction_id": f"{user}-{model}",
         "channel_code": self.infer_channel_code(model),
         # ... 其他参数
     }

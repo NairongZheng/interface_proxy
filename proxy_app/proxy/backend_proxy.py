@@ -185,7 +185,7 @@ class BackendProxy:
           "messages": [...],
           "model": "...",
           "channel_code": "doubao|ali|azure",
-          "transaction_id": "user-model-timestamp",
+          "transaction_id": "user-model",
           ...其他 OpenAI 参数
         }
 
@@ -206,7 +206,7 @@ class BackendProxy:
 
         # 添加 PTU 特有参数
         ptu_request["channel_code"] = PTUAdapter.infer_channel_code(model)
-        ptu_request["transaction_id"] = f"proxy-{model}-{int(time.time())}"
+        ptu_request["transaction_id"] = f"proxy-{model}"
 
         logger.debug(
             f"构造 PTU 请求: channel_code={ptu_request['channel_code']}, "
