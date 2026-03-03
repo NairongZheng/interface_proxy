@@ -21,6 +21,8 @@
 - ✅ **工具调用支持** 完整支持 Tool Use，兼容 Claude Code CLI
 - ✅ **多模型支持** 30+ PTU 模型（Doubao, DeepSeek, Qwen）
 - ✅ **自动路由** 根据模型自动选择后端
+- ✅ **Extra Body 参数** 透传 OpenAI SDK 的 extra_body 参数
+- ✅ **流量监测** 简单的内存流量统计（24h/7d/30d）
 
 ### 架构优势
 
@@ -202,13 +204,7 @@ curl -X POST http://127.0.0.1:8080/v1/chat/completions \
 # 调用 DeepSeek 模型
 curl -X POST http://127.0.0.1:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "DeepSeek-V3",
-    "messages": [
-      {"role": "user", "content": "写一个冒泡排序"}
-    ],
-    "max_tokens": 500
-  }'
+  -d '{"model": "deepseek-v3.2-251201", "messages": [{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": "Answer me two questions: first, Please think how to count the sum of 1 to 100. second, Tell me the weather in Tokyo."}], "tool_choice": "auto", "max_tokens": 1000, "temperature": 0.6, "top_p": 0.95, "frequency_penalty": 0, "presence_penalty": 0, "tools": [{"type": "function", "function": {"name": "get_current_weather", "description": "Get the current weather in a given location", "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "The location to get the weather for"}}, "required": ["location"]}}}], "thinking": {"type": "enabled"}, "enable_thinking": true, "reasoning_mode": "high"}'
 ```
 
 **OpenAI 格式 - 流式请求**：
@@ -271,6 +267,22 @@ curl http://127.0.0.1:8080/v1/models/Doubao-1.5-pro-32k
 
 # 使用 jq 格式化输出
 curl -s http://127.0.0.1:8080/v1/models | jq '.data[] | {id, owned_by}'
+```
+
+**查询流量统计**：
+
+```bash
+# 查询 24 小时统计
+curl "http://127.0.0.1:8080/api/stats?time_range=24h"
+
+# 查询 7 天统计
+curl "http://127.0.0.1:8080/api/stats?time_range=7d"
+
+# 查询特定模型统计
+curl "http://127.0.0.1:8080/api/stats?time_range=24h&model=gpt-4"
+
+# 查询所有使用过的模型
+curl "http://127.0.0.1:8080/api/stats/models"
 ```
 
 ## 🎯 工作原理
@@ -512,6 +524,8 @@ routes:
 - [x] ~~工具调用支持~~ ✅
 - [x] ~~推理内容支持~~ ✅
 - [x] ~~新架构：Adapter 负责后端调用~~ ✅
+- [x] ~~Extra Body 参数支持~~ ✅
+- [x] ~~流量监测功能~~ ✅
 - [ ] 支持更多格式（Google PaLM, Hugging Face TGI 等）
 - [ ] 多后端负载均衡
 - [ ] 缓存层（Redis）
@@ -532,5 +546,6 @@ Interface Proxy Service
 - 📖 [架构文档](docs/ARCHITECTURE.md)
 - 🧪 [测试指南](tests/README.md)
 - 💡 [使用示例](examples/)
+- 📊 [流量监测](docs/features/MONITORING.md)
 
-最后更新：2026-03-02
+最后更新：2024-03-03

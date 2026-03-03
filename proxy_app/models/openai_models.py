@@ -183,6 +183,10 @@ class ChatCompletionResponse(BaseModel):
     usage: Optional[Usage] = None
     system_fingerprint: Optional[str] = None
 
+    class Config:
+        # 允许额外字段（用于传递后端返回的非标准字段）
+        extra = "allow"
+
 
 # ==================== 流式响应模型 ====================
 
@@ -238,6 +242,10 @@ class ChatCompletionChunk(BaseModel):
     choices: List[StreamChoice]
     usage: Optional[Usage] = None
     system_fingerprint: Optional[str] = None
+
+    class Config:
+        # 允许额外字段（用于传递后端返回的非标准字段）
+        extra = "allow"
 
 
 # ==================== Models API 相关模型 ====================

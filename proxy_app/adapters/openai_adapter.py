@@ -43,11 +43,19 @@ class OpenAIAdapter(BaseAdapter):
 
         OpenAI 格式与内部格式非常接近，主要工作是规范化消息格式
 
+        新增功能：支持从 Pydantic 的 __pydantic_extra__ 字段提取额外参数，
+        这些参数来自 OpenAI SDK 的 extra_body 参数（如 enable_thinking、
+        reasoning_mode、chat_template_kwargs 等）
+
         Args:
             request_data: OpenAI ChatCompletionRequest 对象
 
         Returns:
-            内部统一格式的请求字典
+            内部统一格式的请求字典，包含：
+            - messages: 消息列表
+            - model: 模型名称
+            - extra_params: 额外参数字典（如果有）
+            - 其他标准字段
         """
         # 转换消息列表
         internal_messages: List[InternalMessage] = []
@@ -114,6 +122,25 @@ class OpenAIAdapter(BaseAdapter):
         if request_data.tool_choice:
             internal_request["tool_choice"] = request_data.tool_choice
 
+        # ========== 新增：提取额外参数 ==========
+        # 从 Pydantic 的 __pydantic_extra__ 中提取额外参数
+        # 这些参数来自 OpenAI SDK 的 extra_body 参数
+        # 例如：enable_thinking, reasoning_mode, chat_template_kwargs, thinking 等
+        from proxy_app.utils.logger import logger
+
+        extra_params = {}
+
+        # 步骤 1: 安全地访问 Pydantic 模型的额外字
+        # __pydantic_extra__ 包含所有未在模型中定义的字段
+        if hasattr(request_data, "__pydantic_extra__") and request_data.__pydantic_extra__:
+            extra_params = dict(request_data.__pydantic_extra__)
+            logger.debug(f"从 Pydantic 提取到 {len(extra_params)} 个额外参数: {list(extra_params.keys())}")
+
+        # 步骤 2: 如果有额外参数，添加到内部请求中
+        # 这些参数将在后续被合并到后端请求的顶层
+        if extra_params:
+            internal_request["extra_params"] = extra_params
+
         return internal_request
 
     def adapt_response(self, internal_response: InternalResponse) -> ChatCompletionResponse:
@@ -176,6 +203,22 @@ class OpenAIAdapter(BaseAdapter):
             choices=[choice],
             usage=usage,
         )
+
+        # ========== 新增：合并额外字段到响应 ==========
+        # 将后端返回的额外字段合并到最终响应中
+        # 这样客户端可以接收这些额外信息（如 thinking、metadata 等）
+        if internal_response.get("extra_fields"):
+            extra_fields = internal_response["extra_fields"]
+
+            from proxy_app.utils.logger import logger
+            logger.debug(
+                f"合并 {len(extra_fields)} 个额外字段到客户端响应: {list(extra_fields.keys())}"
+            )
+
+            # 步骤 1: 将额外字段设置到 Pydantic 模型
+            # 由于响应模型配置了 extra="allow"，可以直接设置额外属性
+            for key, value in extra_fields.items():
+                setattr(response, key, value)
 
         return response
 
@@ -252,6 +295,20 @@ class OpenAIAdapter(BaseAdapter):
                 choices=[stream_choice],
                 usage=usage,
             )
+
+            # ========== 新增：合并额外字段到流式响应块 ==========
+            # 将后端返回的额外字段合并到流式响应中
+            if chunk.get("extra_fields"):
+                extra_fields = chunk["extra_fields"]
+
+                from proxy_app.utils.logger import logger
+                logger.debug(
+                    f"合并 {len(extra_fields)} 个额外字段到流式响应块: {list(extra_fields.keys())}"
+                )
+
+                # 设置额外字段到 Pydantic 模型
+                for key, value in extra_fields.items():
+                    setattr(chunk_obj, key, value)
 
             # 转换为 SSE 格式：data: {JSON}\n\n
             sse_data = f"data: {chunk_obj.model_dump_json()}\n\n"
@@ -405,11 +462,15 @@ class OpenAIAdapter(BaseAdapter):
         """
         构造标准 OpenAI 请求格式
 
+        新增功能：支持合并 extra_params 到最终请求中，
+        以便传递给后端（如 enable_thinking, chat_template_kwargs, thinking 等）
+
         Args:
             internal_request: 内部统一格式的请求
 
         Returns:
-            OpenAI 格式的请求字典
+            OpenAI 格式的请求字典，如果有 extra_params，
+            会将其合并到请求的顶层（与 OpenAI SDK 的行为一致）
         """
         openai_request = {
             "model": internal_request["model"],
@@ -441,18 +502,41 @@ class OpenAIAdapter(BaseAdapter):
         if "tool_choice" in internal_request:
             openai_request["tool_choice"] = internal_request["tool_choice"]
 
+        # ========== 新增：合并额外参数 ==========
+        # 将 extra_params 合并到请求的顶层
+        # 这样后端可以接收这些额外参数（与 OpenAI SDK 的行为一致）
+        # 例如：{"enable_thinking": true, "thinking": {"type": "enable"}}
+        from proxy_app.utils.logger import logger
+
+        if "extra_params" in internal_request and internal_request["extra_params"]:
+            extra_params = internal_request["extra_params"]
+
+            logger.debug(
+                f"合并 {len(extra_params)} 个额外参数到 OpenAI 后端请求: {list(extra_params.keys())}"
+            )
+
+            # 步骤 1: 直接合并到顶层
+            # 注意：如果有重复的键，extra_params 会覆盖标准参数
+            # 这是符合预期的行为，因为用户明确指定了这些参数
+            openai_request.update(extra_params)
+
         return openai_request
 
     def _parse_openai_response(self, openai_response: dict) -> InternalResponse:
         """
         解析 OpenAI 格式响应为内部格式
 
+        新增功能：提取后端返回的额外字段，
+        确保非标准字段（如 thinking、metadata 等）不会丢失
+
         Args:
             openai_response: OpenAI 格式的响应
 
         Returns:
-            内部统一格式的响应
+            内部统一格式的响应，包含额外字段（如果有）
         """
+        from proxy_app.utils.logger import logger
+
         # 提取关键信息
         choices = openai_response.get("choices", [])
         if not choices:
@@ -478,18 +562,49 @@ class OpenAIAdapter(BaseAdapter):
         if "tool_calls" in message:
             internal_response["tool_calls"] = message["tool_calls"]
 
+        # ========== 新增：提取额外字段 ==========
+        # 定义已知的标准字段，其他字段视为额外字段
+        known_response_fields = {
+            "id", "object", "created", "model", "choices", "usage", "system_fingerprint"
+        }
+        known_message_fields = {
+            "role", "content", "tool_calls", "reasoning_content", "name", "tool_call_id"
+        }
+
+        extra_fields = {}
+
+        # 步骤 1: 提取响应顶层的额外字段
+        for key, value in openai_response.items():
+            if key not in known_response_fields:
+                extra_fields[key] = value
+
+        # 步骤 2: 提取 message 中的额外字段
+        for key, value in message.items():
+            if key not in known_message_fields:
+                # 使用 message_ 前缀避免冲突
+                extra_fields[f"message_{key}"] = value
+
+        # 步骤 3: 如果有额外字段，添加到内部响应
+        if extra_fields:
+            internal_response["extra_fields"] = extra_fields
+            logger.debug(f"从后端响应提取到 {len(extra_fields)} 个额外字段: {list(extra_fields.keys())}")
+
         return internal_response
 
     def _parse_openai_stream_chunk(self, openai_chunk: dict) -> InternalStreamChunk:
         """
         解析 OpenAI 流式响应块为内部格式
 
+        新增功能：提取流式响应中的额外字段
+
         Args:
             openai_chunk: OpenAI 格式的流式响应块
 
         Returns:
-            内部统一格式的流式响应块
+            内部统一格式的流式响应块，包含额外字段（如果有）
         """
+        from proxy_app.utils.logger import logger
+
         choices = openai_chunk.get("choices", [])
         if not choices:
             return {
@@ -521,5 +636,29 @@ class OpenAIAdapter(BaseAdapter):
             internal_chunk["delta_tool_calls"] = delta["tool_calls"]
         if "usage" in openai_chunk:
             internal_chunk["usage"] = openai_chunk["usage"]
+
+        # ========== 新增：提取流式响应的额外字段 ==========
+        known_chunk_fields = {
+            "id", "object", "created", "model", "choices", "usage", "system_fingerprint"
+        }
+        known_delta_fields = {
+            "role", "content", "tool_calls", "reasoning_content"
+        }
+
+        extra_fields = {}
+
+        # 提取响应块顶层的额外字段
+        for key, value in openai_chunk.items():
+            if key not in known_chunk_fields:
+                extra_fields[key] = value
+
+        # 提取 delta 中的额外字段
+        for key, value in delta.items():
+            if key not in known_delta_fields:
+                extra_fields[f"delta_{key}"] = value
+
+        if extra_fields:
+            internal_chunk["extra_fields"] = extra_fields
+            logger.debug(f"从流式响应提取到 {len(extra_fields)} 个额外字段: {list(extra_fields.keys())}")
 
         return internal_chunk

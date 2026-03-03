@@ -190,11 +190,15 @@ class PTUAdapter(OpenAIAdapter):
           ...
         }
 
+        新增功能：支持将 extra_params 传递到 PTU 后端
+        额外参数（如 enable_thinking, reasoning_mode 等）会被合并到请求的顶层
+
         Args:
             internal_request: 内部统一格式的请求
 
         Returns:
-            PTU 格式的请求字典
+            PTU 格式的请求字典，如果有 extra_params，
+            会将其合并到请求的顶层
         """
         model = internal_request["model"]
 
@@ -222,6 +226,21 @@ class PTUAdapter(OpenAIAdapter):
             ptu_request["tools"] = internal_request["tools"]
         if "tool_choice" in internal_request:
             ptu_request["tool_choice"] = internal_request["tool_choice"]
+
+        # ========== 新增：合并额外参数 ==========
+        # PTU 后端也需要支持额外参数（如 enable_thinking, reasoning_mode 等）
+        # 将 extra_params 合并到 PTU 请求的顶层
+        # PTU Gateway 会将这些参数传递给下游模型服务
+        if "extra_params" in internal_request and internal_request["extra_params"]:
+            extra_params = internal_request["extra_params"]
+
+            logger.debug(
+                f"合并 {len(extra_params)} 个额外参数到 PTU 后端请求: {list(extra_params.keys())}"
+            )
+
+            # 步骤 1: 直接合并到顶层
+            # 与 OpenAI 适配器的行为保持一致
+            ptu_request.update(extra_params)
 
         return ptu_request
 

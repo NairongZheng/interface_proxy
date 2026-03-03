@@ -45,6 +45,10 @@ class InternalRequest(TypedDict, total=False):
         frequency_penalty: 频率惩罚（-2 到 2）
         n: 生成的候选数量
         user: 用户标识符（可选）
+        extra_params: 额外参数字典（可选）
+                      用于存储来自 OpenAI SDK extra_body 的非标准参数
+                      例如：enable_thinking, chat_template_kwargs, reasoning_mode 等
+                      这些参数会被直接传递到后端服务
     """
     messages: List[InternalMessage]
     model: str
@@ -58,6 +62,7 @@ class InternalRequest(TypedDict, total=False):
     frequency_penalty: Optional[float]
     n: Optional[int]
     user: Optional[str]
+    extra_params: Optional[Dict[str, Any]]  # 新增：额外参数（来自 extra_body）
 
 
 class InternalUsage(TypedDict):
@@ -90,6 +95,10 @@ class InternalResponse(TypedDict, total=False):
         reasoning_content: 推理过程内容（可选，用于支持 o1 等模型）
         finish_reason: 结束原因（stop, length, tool_calls, content_filter 等）
         usage: token 使用统计
+        extra_fields: 额外字段字典（可选）
+                      用于存储后端返回的非标准字段
+                      例如：thinking, metadata, custom_fields 等
+                      这些字段会被传递回客户端
     """
     id: str
     created: int
@@ -100,6 +109,7 @@ class InternalResponse(TypedDict, total=False):
     reasoning_content: Optional[str]
     finish_reason: Optional[str]
     usage: Optional[InternalUsage]
+    extra_fields: Optional[Dict[str, Any]]  # 新增：额外字段（来自后端响应）
 
 
 class InternalStreamChunk(TypedDict, total=False):
@@ -118,6 +128,8 @@ class InternalStreamChunk(TypedDict, total=False):
         delta_reasoning_content: 增量推理内容（可选）
         finish_reason: 结束原因（只在最后一个块出现）
         usage: token 使用统计（可选，只在最后一个块出现）
+        extra_fields: 额外字段字典（可选）
+                      用于存储后端返回的流式非标准字段
     """
     id: str
     created: int
@@ -128,6 +140,7 @@ class InternalStreamChunk(TypedDict, total=False):
     delta_reasoning_content: Optional[str]
     finish_reason: Optional[str]
     usage: Optional[InternalUsage]
+    extra_fields: Optional[Dict[str, Any]]  # 新增：额外字段（来自后端流式响应）
 
 
 # 类型别名，方便使用
