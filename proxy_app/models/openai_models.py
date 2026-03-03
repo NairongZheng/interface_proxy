@@ -145,6 +145,34 @@ class ChatCompletionMessage(BaseModel):
     tool_calls: Optional[List[ToolCall]] = None
     reasoning_content: Optional[str] = None
 
+    class Config:
+        # 允许额外字段（用于传递后端返回的非标准字段）
+        extra = "allow"
+
+    def __getattr__(self, name: str) -> Any:
+        """
+        支持通过属性访问额外字段
+
+        这使得可以像 OpenAI SDK 一样直接访问额外字段：
+        message.custom_field 而不是 message["model_extra"]["custom_field"]
+
+        Args:
+            name: 属性名称
+
+        Returns:
+            额外字段的值
+
+        Raises:
+            AttributeError: 如果字段不存在
+        """
+        try:
+            # Pydantic v2 使用 __pydantic_extra__ 存储额外字段
+            return self.__pydantic_extra__[name]
+        except (KeyError, AttributeError):
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
+
 
 class Choice(BaseModel):
     """
@@ -204,6 +232,33 @@ class DeltaMessage(BaseModel):
     content: Optional[str] = None
     tool_calls: Optional[List[ToolCall]] = None
     reasoning_content: Optional[str] = None
+
+    class Config:
+        # 允许额外字段（用于传递后端返回的非标准字段）
+        extra = "allow"
+
+    def __getattr__(self, name: str) -> Any:
+        """
+        支持通过属性访问额外字段
+
+        这使得可以像 OpenAI SDK 一样直接访问额外字段
+
+        Args:
+            name: 属性名称
+
+        Returns:
+            额外字段的值
+
+        Raises:
+            AttributeError: 如果字段不存在
+        """
+        try:
+            # Pydantic v2 使用 __pydantic_extra__ 存储额外字段
+            return self.__pydantic_extra__[name]
+        except (KeyError, AttributeError):
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
 
 
 class StreamChoice(BaseModel):

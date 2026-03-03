@@ -178,6 +178,16 @@ class OpenAIAdapter(BaseAdapter):
         if internal_response.get("reasoning_content"):
             message.reasoning_content = internal_response["reasoning_content"]
 
+        # ========== 新增：处理 message 级别的额外字段 ==========
+        # 将以 message_ 开头的额外字段设置到 message 对象
+        if internal_response.get("extra_fields"):
+            extra_fields = internal_response["extra_fields"]
+            for key, value in extra_fields.items():
+                if key.startswith("message_"):
+                    # 去掉 message_ 前缀，设置到 message 对象
+                    field_name = key[8:]  # 移除 "message_" 前缀
+                    setattr(message, field_name, value)
+
         # 构建 Choice 对象
         choice = Choice(
             index=0,
@@ -204,8 +214,8 @@ class OpenAIAdapter(BaseAdapter):
             usage=usage,
         )
 
-        # ========== 新增：合并额外字段到响应 ==========
-        # 将后端返回的额外字段合并到最终响应中
+        # ========== 修改：处理响应级别的额外字段 ==========
+        # 将非 message_ 开头的额外字段合并到最终响应中
         # 这样客户端可以接收这些额外信息（如 thinking、metadata 等）
         if internal_response.get("extra_fields"):
             extra_fields = internal_response["extra_fields"]
@@ -215,10 +225,11 @@ class OpenAIAdapter(BaseAdapter):
                 f"合并 {len(extra_fields)} 个额外字段到客户端响应: {list(extra_fields.keys())}"
             )
 
-            # 步骤 1: 将额外字段设置到 Pydantic 模型
-            # 由于响应模型配置了 extra="allow"，可以直接设置额外属性
+            # 将非 message_ 开头的额外字段设置到 response 对象
+            # message_ 开头的字段已在上面处理到 message 对象了
             for key, value in extra_fields.items():
-                setattr(response, key, value)
+                if not key.startswith("message_"):
+                    setattr(response, key, value)
 
         return response
 
@@ -270,6 +281,16 @@ class OpenAIAdapter(BaseAdapter):
             if chunk.get("delta_reasoning_content"):
                 delta.reasoning_content = chunk["delta_reasoning_content"]
 
+            # ========== 新增：处理 delta 级别的额外字段 ==========
+            # 将以 message_ 开头的额外字段设置到 delta 对象
+            if chunk.get("extra_fields"):
+                extra_fields = chunk["extra_fields"]
+                for key, value in extra_fields.items():
+                    if key.startswith("message_"):
+                        # 去掉 message_ 前缀，设置到 delta 对象
+                        field_name = key[8:]  # 移除 "message_" 前缀
+                        setattr(delta, field_name, value)
+
             # 构建流式选择
             stream_choice = StreamChoice(
                 index=0,
@@ -296,8 +317,9 @@ class OpenAIAdapter(BaseAdapter):
                 usage=usage,
             )
 
-            # ========== 新增：合并额外字段到流式响应块 ==========
-            # 将后端返回的额外字段合并到流式响应中
+            # ========== 修改：处理响应块级别的额外字段 ==========
+            # 将非 message_ 开头的额外字段合并到流式响应中
+            # message_ 开头的字段已在上面处理到 delta 对象了
             if chunk.get("extra_fields"):
                 extra_fields = chunk["extra_fields"]
 
@@ -306,9 +328,10 @@ class OpenAIAdapter(BaseAdapter):
                     f"合并 {len(extra_fields)} 个额外字段到流式响应块: {list(extra_fields.keys())}"
                 )
 
-                # 设置额外字段到 Pydantic 模型
+                # 将非 message_ 开头的额外字段设置到 chunk_obj 对象
                 for key, value in extra_fields.items():
-                    setattr(chunk_obj, key, value)
+                    if not key.startswith("message_"):
+                        setattr(chunk_obj, key, value)
 
             # 转换为 SSE 格式：data: {JSON}\n\n
             sse_data = f"data: {chunk_obj.model_dump_json()}\n\n"
