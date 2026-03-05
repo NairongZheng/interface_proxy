@@ -10,7 +10,7 @@ backend:
   url: "https://api.ppchat.vip"
 
   # API Key（用于后端认证）
-  api_key: "REMOVED_API_KEY"
+  api_key: "xxx"
 
   # 请求超时时间（秒）
   timeout: 600.0
@@ -161,25 +161,24 @@ ptu:
 
   # PTU 模型列表（用于路由层判断模型是否属于 PTU 后端）
   models:
+    # Doubao 系列
     - "Doubao-1.5-pro-32k"
     - "Doubao-1.5-pro-32k-character-250228"
     - "Doubao-1.5-vision-pro"
     - "Doubao-1.5-thinking-pro"
     - "doubao-1.5-thinking-vision-pro-250428"
     - "doubao-1-5-thinking-pro-m-250428"
-    - "DeepSeek-R1"
-    - "Doubao-1.5-pro-32k"
-    - "DeepSeek-R1-250528"
-    - "DeepSeek-V3"
     - "doubao-seed-1.6-250615"
     - "doubao-seed-1.6-thinking-250615"
     - "doubao-seed-1.6-flash-250615"
-    - "gpt-5-nano-2025-08-07"
-    - "gpt-5-mini-2025-08-07"
-    - "gpt-5-2025-08-07"
+    - "doubao-seed-2.0-260215"
+    # DeepSeek 系列
+    - "DeepSeek-R1"
+    - "DeepSeek-R1-250528"
+    - "DeepSeek-V3"
     - "deepseek-v3.1-250821"
     - "deepseek-v3.2-251201"
-    - "doubao-seed-2.0-260215"
+    # Qwen 系列
     - "qwen3-235b-a22b-thinking-2507"
     - "qwen3-vl-30b-a3b-thinking"
     - "qwen3-vl-30b-a3b-instruct"
@@ -189,3 +188,7 @@ ptu:
     - "qwen3.5-397b-a17b"
     - "qwen3.5-plus"
     - "qwen3.5-flash"
+    # GPT-5 系列
+    - "gpt-5-nano-2025-08-07"
+    - "gpt-5-mini-2025-08-07"
+    - "gpt-5-2025-08-07"

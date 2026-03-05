@@ -22,7 +22,6 @@ from proxy_app.models.openai_models import (
     ModelPermission,
 )
 from proxy_app.utils.logger import logger, setup_logger
-from proxy_app.monitoring.simple_stats import get_collector
 
 
 def create_app(config: Config = None) -> FastAPI:
@@ -52,49 +51,22 @@ def create_app(config: Config = None) -> FastAPI:
     # 存储配置到 app.state
     app.state.config = config
 
-    # 添加统计中间件
-    @app.middleware("http")
-    async def stats_middleware(request: Request, call_next):
-        """
-        统计中间件 - 只递增计数器，极速处理
-
-        监控 /v1/chat/completions 路径的请求，记录模型使用情况和成功/失败状态
-        """
-        # 只监控 /v1/chat/completions 路径
-        if not request.url.path.startswith("/v1/chat/completions"):
-            return await call_next(request)
-
-        # 提取模型信息
-        model = "unknown"
-        if request.method == "POST":
-            try:
-                # 读取请求体
-                body = await request.body()
-                data = json.loads(body)
-                model = data.get("model", "unknown")
-
-                # 重新设置 body 供后续读取
-                # 因为 request.body() 只能读取一次，需要保存以便后续处理
-                async def receive():
-                    return {"type": "http.request", "body": body}
-                request._receive = receive
-            except Exception as e:
-                logger.warning(f"解析请求体失败: {e}")
-
-        # 调用下游处理
-        status = "error"
-        try:
-            response = await call_next(request)
-            # 根据 HTTP 状态码判断成功或失败
-            status = "success" if response.status_code < 400 else "error"
-            return response
-        except Exception:
-            status = "error"
-            raise
-        finally:
-            # 记录统计（只递增计数器，极快）
-            collector = get_collector()
-            collector.record(model, status)
+    # 在应用启动时创建适配器实例（复用 HTTP 连接池）
+    app.state.openai_adapter = OpenAIAdapter(
+        backend_url=config.backend_url,
+        api_key=config.backend_api_key,
+        timeout=config.backend_timeout,
+    )
+    app.state.ptu_adapter = PTUAdapter(
+        backend_url=config.ptu_backend_url,
+        api_key=config.backend_api_key,
+        timeout=config.backend_timeout,
+    )
+    app.state.anthropic_adapter = AnthropicAdapter(
+        backend_url=config.backend_url,
+        api_key=config.backend_api_key,
+        timeout=config.backend_timeout,
+    )
 
     # 注册启动和关闭事件
     @app.on_event("startup")
@@ -108,9 +80,11 @@ def create_app(config: Config = None) -> FastAPI:
 
     @app.on_event("shutdown")
     async def shutdown_event():
-        """
-        应用关闭时清理资源
-        """
+        """应用关闭时清理资源"""
+        logger.info("正在关闭适配器...")
+        await app.state.openai_adapter.close()
+        await app.state.ptu_adapter.close()
+        await app.state.anthropic_adapter.close()
         logger.info("应用已关闭")
 
     # 注册路由
@@ -383,23 +357,13 @@ def register_routes(app: FastAPI, config: Config):
             """
             logger.info(f"收到 OpenAI 格式请求: model={request.model}, stream={request.stream}")
 
-            # 根据模型选择适配器
+            # 根据模型选择适配器（从 app.state 复用）
             if config.is_ptu_model(request.model):
                 logger.info(f"模型 {request.model} 为 PTU 模型，使用 PTUAdapter")
-                # PTU 使用特定的 backend_url
-                backend_url = config.ptu_backend_url or config.backend_url
-                adapter = PTUAdapter(
-                    backend_url=backend_url,
-                    api_key=config.backend_api_key,
-                    timeout=config.backend_timeout,
-                )
+                adapter = app.state.ptu_adapter
             else:
                 logger.info(f"模型 {request.model} 为标准模型，使用 OpenAIAdapter")
-                adapter = OpenAIAdapter(
-                    backend_url=config.backend_url,
-                    api_key=config.backend_api_key,
-                    timeout=config.backend_timeout,
-                )
+                adapter = app.state.openai_adapter
 
             # 使用通用处理函数处理请求
             return await handle_request(request, adapter, config)
@@ -440,71 +404,13 @@ def register_routes(app: FastAPI, config: Config):
                 f"stream={request.stream}, max_tokens={request.max_tokens}"
             )
 
-            # 创建 Anthropic 适配器
-            # Anthropic 目前转换为 OpenAI 格式后调用后端
-            adapter = AnthropicAdapter(
-                backend_url=config.backend_url,
-                api_key=config.backend_api_key,
-                timeout=config.backend_timeout,
-            )
+            # 使用 Anthropic 适配器（从 app.state 复用）
+            adapter = app.state.anthropic_adapter
 
             # 使用通用处理函数处理请求
             return await handle_request(request, adapter, config)
 
         logger.info("Anthropic 格式路由已启用: /v1/messages")
-
-    # ==================== 统计路由 ====================
-
-    @app.get("/api/stats")
-    async def get_statistics(
-        time_range: str = "24h",
-        model: Optional[str] = None
-    ):
-        """
-        获取流量统计
-
-        查询指定时间范围内的请求统计数据，支持按模型过滤
-
-        Args:
-            time_range: 时间范围（24h/7d/30d），默认 24h
-            model: 模型过滤（可选），为空时返回所有模型
-
-        Returns:
-            统计数据字典，包含：
-            - time_range: 时间范围
-            - total_requests: 总请求数
-            - success_count: 成功数
-            - error_count: 失败数
-            - by_model: 按模型分组的详细统计
-
-        示例：
-            GET /api/stats?time_range=24h
-            GET /api/stats?time_range=7d&model=gpt-4
-        """
-        collector = get_collector()
-        return collector.get_stats(time_range=time_range, model=model)
-
-    @app.get("/api/stats/models")
-    async def get_model_list():
-        """
-        获取所有使用过的模型列表
-
-        返回最近 30 天内所有被请求过的模型名称
-
-        Returns:
-            模型列表字典，包含：
-            - models: 模型名称列表
-            - count: 模型数量
-
-        示例：
-            GET /api/stats/models
-        """
-        collector = get_collector()
-        stats = collector.get_stats(time_range="30d")
-        models = [item["model"] for item in stats["by_model"]]
-        return {"models": models, "count": len(models)}
-
-    logger.info("统计路由已启用: /api/stats, /api/stats/models")
 
     # ==================== 通用请求处理 ====================
 
